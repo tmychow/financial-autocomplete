@@ -1,0 +1,6 @@
+repos:
+  # nbstripout: removes outputs & execution counts
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.8.1
+    hooks:
+      - id: nbstripout

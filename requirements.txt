@@ -1,0 +1,21 @@
+# Minimal requirements for testing autocomplete logic locally
+
+# Web server for test interface
+fastapi>=0.100.0
+uvicorn>=0.20.0
+pydantic>=2.0.0
+
+# Database
+aiosqlite>=0.19.0
+
+# HTTP client for Tiingo API
+httpx>=0.25.0
+
+# Progress bars for rollout testing
+tqdm>=4.65.0
+
+# LLM API for testing (set OPENAI_API_KEY env var)
+openai>=1.0.0
+
+# Environment variable loading
+python-dotenv>=0.19.0
