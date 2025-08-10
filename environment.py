@@ -138,6 +138,10 @@ class FinancialEnvironment:
             duration: Duration for CAGR calculation (number of periods)
         """
         result = None
+
+        # Validate numeric inputs; if invalid, return a simple error string
+        if not isinstance(num1, (int, float)) or not isinstance(num2, (int, float)):
+            return "Invalid tool usage: calculate expects numeric num1 and num2."
         
         if operation == "add":
             result = num1 + num2
@@ -308,15 +312,21 @@ def parse_tool_calls_from_response(response: str) -> List[Dict[str, Any]]:
                                         break
                                 parsed_args[params[i]] = val
                 
-                # Convert types for calculate function
+                # Convert types for calculate function (tolerant to bad inputs)
                 if tool_name == "calculate" and parsed_args:
                     if "num1" in parsed_args:
-                        parsed_args["num1"] = float(parsed_args["num1"])
+                        try:
+                            parsed_args["num1"] = float(parsed_args["num1"])  # may be string
+                        except (ValueError, TypeError):
+                            parsed_args["num1"] = None
                     if "num2" in parsed_args:
-                        parsed_args["num2"] = float(parsed_args["num2"])
+                        try:
+                            parsed_args["num2"] = float(parsed_args["num2"])  # may be string
+                        except (ValueError, TypeError):
+                            parsed_args["num2"] = None
                     if "duration" in parsed_args:
                         duration_val = parsed_args["duration"]
-                        if duration_val and duration_val.lower() != 'none':
+                        if duration_val and str(duration_val).lower() != 'none':
                             try:
                                 parsed_args["duration"] = int(duration_val)
                             except ValueError:

@@ -154,7 +154,7 @@ async def generate_difference_case(tickers: List[str], metrics: List[Dict[str, s
         templates = [
             "The change in {desc} for {company} from {p1} to {p2} is ",
             "{company}'s {desc} changed from {p1} to {p2} by ",
-            "From {p1} to {p2}, {company}'s {desc} difference was ",
+            "From {p1} to {p2}, {company}'s {desc} changed by ",
         ]
         
         prefix = random.choice(templates).format(
