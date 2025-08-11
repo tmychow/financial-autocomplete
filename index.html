@@ -648,7 +648,13 @@
                     if (modelResult.tool_calls !== undefined) {
                         html += `<div class="stats-row">
                             <span>Tool calls: ${modelResult.tool_calls}</span>
-                            <span>Reward (Judge Score): ${modelResult.reward?.toFixed(3) || 'N/A'}</span>
+                            <span>Total Reward: ${modelResult.reward?.toFixed(3) || 'N/A'}</span>
+                            <span>Judge: ${(modelResult.judge_score ?? modelResult.reward)?.toFixed?.(3) || modelResult.judge_score || 'N/A'}</span>
+                            <span>Used get_value: ${(modelResult.used_get_value ?? 0).toFixed(2)}</span>
+                            <span>Coverage: ${(modelResult.lookup_coverage ?? 0).toFixed(2)}</span>
+                            <span>Ticker: ${(modelResult.ticker_correct ?? 0).toFixed(2)}</span>
+                            <span>Metric: ${(modelResult.metric_correct ?? 0).toFixed(2)}</span>
+                            <span>Period: ${(modelResult.period_correct ?? 0).toFixed(2)}</span>
                         </div>`;
                     }
                     

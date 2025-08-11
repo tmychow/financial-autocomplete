@@ -40,7 +40,8 @@ class EvaluationRequest(BaseModel):
 class EvaluationResponse(BaseModel):
     results: List[Dict[str, Any]]
     accuracy_scores: Dict[str, float]
-    test_cases: List[Dict[str, str]]
+    # Allow metadata objects in test cases
+    test_cases: List[Dict[str, Any]]
 
 # Startup event to initialize database
 @app.on_event("startup")
@@ -150,6 +151,29 @@ async def batch_evaluation(request: EvaluationRequest):
                             return response.choices[0].message.content.strip()
                     
                     model = OpenAIModel(model_name)
+                elif model_name.startswith("ollama:"):
+                    # Use local Ollama models
+                    # Model name format: "ollama:<model_id>", e.g., "ollama:llama3"
+                    class OllamaModel:
+                        def __init__(self, model_name):
+                            # Strip prefix
+                            self.name = model_name.split(":", 1)[1]
+                        async def __call__(self, messages):
+                            try:
+                                import asyncio
+                                import ollama
+                                loop = asyncio.get_running_loop()
+                                def _chat():
+                                    return ollama.chat(
+                                        model=self.name,
+                                        messages=messages,
+                                        options={"temperature": 0.1}
+                                    )
+                                response = await loop.run_in_executor(None, _chat)
+                                return response["message"]["content"].strip()
+                            except Exception as e:
+                                return f"return_answer(answer='[ollama error: {str(e)}]')"
+                    model = OllamaModel(model_name)
                 else:
                     # Default to a mock model for testing
                     class MockModel:
@@ -170,6 +194,8 @@ async def batch_evaluation(request: EvaluationRequest):
                     completion,
                     test_case["ground_truth"],
                     episode_info,
+                    tool_calls=tool_calls,
+                    case_metadata=test_case.get("metadata"),
                     use_judge=request.use_judge
                 )
                 
@@ -178,9 +204,15 @@ async def batch_evaluation(request: EvaluationRequest):
                     "prediction": completion,
                     "is_correct": reward_info["is_correct"],
                     "reward": reward_info["total_reward"],
+                    "judge_score": reward_info.get("correctness_score", None),
                     "tool_calls": episode_info["tool_calls_count"],
                     "tool_calls_log": tool_calls,  # Add full tool call log
-                    "reasoning": reward_info.get("reasoning", "")
+                    "reasoning": reward_info.get("reasoning", ""),
+                    "used_get_value": reward_info.get("used_get_value", 0.0),
+                    "lookup_coverage": reward_info.get("lookup_coverage", 0.0),
+                    "ticker_correct": reward_info.get("ticker_correct", 0.0),
+                    "metric_correct": reward_info.get("metric_correct", 0.0),
+                    "period_correct": reward_info.get("period_correct", 0.0),
                 }
                 
                 if reward_info["is_correct"]:

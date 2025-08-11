@@ -14,11 +14,12 @@ Train a small LLM to complete text with financial data using RL + tool calls.
 
 ## Key Files
 - `database.py`: Tiingo data loading (statements + daily endpoints, exact field mapping)
-- `environment.py`: Executes tools (get_metrics, get_tickers, get_value, calculate, return_answer)
+- `environment.py`: Executes tools (get_value, calculate, return_answer)
 - `agent.py`: Manages multi-turn tool calling conversations
-- `rewards.py`: LLM-as-judge (same logic as main eval system)
+- `rewards.py`: LLM-as-judge + bonuses (used `get_value`, lookup coverage, per-dimension: ticker/metric/period)
 - `rollout.py`: Generates training trajectories
 - `server.py` + `index.html`: Test interface
+  - Supports OpenAI models (prefix `gpt-`) and local Ollama models (prefix `ollama:`)
 
 ## Database Improvements (Dec 2024)
 - Added daily data endpoint for marketCap, peRatio, pbRatio, trailingPEG1Y
@@ -29,7 +30,8 @@ Train a small LLM to complete text with financial data using RL + tool calls.
 
 ## Important
 - NO sample data - requires real Tiingo API or fails
-- Tool syntax: `get_value(metric="revenue", ticker="AAPL", period="2023FY")`
+- Tool syntax: `get_value(metric="revenue", ticker="Apple", period="2023")` (flexible: company names, natural metric names, loose periods)
+- Episode ends with `return_answer(answer="...")`
 - Metric names MUST match Tiingo's exact dataCodes
 - Episode ends with `return_answer(answer="...")`
 - Self-contained - now matches parent project's data coverage

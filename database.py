@@ -18,7 +18,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Database configuration
-DATABASE_PATH = "/tmp/financial_data.db"  # Use temp directory for Colab
+# Default to a persistent DB file in the project directory; allow override via env
+PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+DATABASE_PATH = os.getenv("DATABASE_PATH", os.path.join(PROJECT_ROOT, "financial_data.db"))
 
 # ============== Core Database Functions ==============
 

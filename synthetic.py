@@ -29,14 +29,69 @@ def format_value(value: float, unit: str) -> str:
     return str(value)
 
 async def get_company_name(ticker: str) -> str:
-    """Get company name for a ticker"""
+    """Get colloquial company name for a ticker (prefer short/common names)."""
     async with get_db() as db:
         async with db.execute(
             "SELECT company_name FROM tickers WHERE ticker = ?",
             (ticker,)
         ) as cur:
             row = await cur.fetchone()
-            return row["company_name"] if row and row["company_name"] else ticker
+            full_name = row["company_name"] if row and row["company_name"] else ticker
+            # Comprehensive map for all loaded companies (see database.setup_database tickers_to_load)
+            mapping = {
+                # Tech megacaps
+                "Apple Inc.": "Apple",
+                "Microsoft Corporation": "Microsoft",
+                "Alphabet Inc.": "Google",
+                "Amazon.com Inc.": "Amazon",
+                "Meta Platforms Inc.": "Meta",
+                # Semis / chip-related
+                "NVIDIA Corporation": "NVIDIA",
+                "Intel Corporation": "Intel",
+                "Micron Technology Inc.": "Micron",
+                "Taiwan Semiconductor Manufacturing": "TSMC",
+                "Broadcom Inc.": "Broadcom",
+                "Marvell Technology Inc.": "Marvell",
+                "Applied Materials Inc.": "Applied Materials",
+                "Lam Research Corporation": "Lam Research",
+                "ASML Holding N.V.": "ASML",
+                # Software / enterprise
+                "Oracle Corporation": "Oracle",
+                "Arista Networks Inc.": "Arista Networks",
+                # Energy / utilities / industrials
+                "Tesla Inc.": "Tesla",
+                "Vistra Corp.": "Vistra",
+                "GE Vernova Inc.": "GE Vernova",
+                "Constellation Energy Corporation": "Constellation Energy",
+                "NRG Energy Inc.": "NRG Energy",
+                "Talen Energy Corporation": "Talen Energy",
+                "Bloom Energy Corporation": "Bloom Energy",
+                # Edge / communications / components
+                "Coherent Corp.": "Coherent",
+                "Onto Innovation Inc.": "Onto Innovation",
+                "Credo Technology Group Holding Ltd": "Credo Technology",
+                "Fabrinet": "Fabrinet",
+                "TSS Inc.": "TSS",
+                # Data center / infrastructure
+                "Vertiv Holdings Co.": "Vertiv",
+                # Newer listings / others
+                "Nebius Group N.V.": "Nebius",
+            }
+            if full_name in mapping:
+                return mapping[full_name]
+
+            # Generic cleanup fallback: remove common corporate suffixes
+            cleaned = full_name
+            # Remove common suffixes once, insensitive to dots/commas
+            suffixes = [
+                " Inc.", " Incorporated", " Corporation", " Corp.", " Co.",
+                " N.V.", " Ltd", " Limited", " Holdings", " Holding", " Group"
+            ]
+            for suf in suffixes:
+                if cleaned.endswith(suf):
+                    cleaned = cleaned[: -len(suf)]
+                    cleaned = cleaned.rstrip()
+            return cleaned
 
 # ============== Generation Helpers ==============
 
@@ -78,7 +133,13 @@ async def generate_latest_case(tickers: List[str], metrics: List[Dict[str, str]]
             desc=metric["description"].lower()
         )
         completion = format_value(value["value"], value.get("unit"))
-        return {"input": prefix, "ground_truth": completion}
+        metadata = {
+            "type": "latest",
+            "required_lookups": [
+                {"ticker": ticker, "metric": metric["metric_name"], "period": "latest"}
+            ]
+        }
+        return {"input": prefix, "ground_truth": completion, "metadata": metadata}
     return None
 
 async def generate_simple_case(tickers: List[str], metrics: List[Dict[str, str]]):
@@ -132,7 +193,13 @@ async def generate_simple_case(tickers: List[str], metrics: List[Dict[str, str]]
             continue
         
         completion = format_value(value["value"], value.get("unit"))
-        return {"input": prefix, "ground_truth": completion}
+        metadata = {
+            "type": "simple",
+            "required_lookups": [
+                {"ticker": ticker, "metric": metric["metric_name"], "period": period}
+            ]
+        }
+        return {"input": prefix, "ground_truth": completion, "metadata": metadata}
     return None
 
 async def generate_difference_case(tickers: List[str], metrics: List[Dict[str, str]]):
@@ -164,7 +231,14 @@ async def generate_difference_case(tickers: List[str], metrics: List[Dict[str, s
             p2=p2
         )
         completion = format_value(diff, v1.get("unit"))
-        return {"input": prefix, "ground_truth": completion}
+        metadata = {
+            "type": "difference",
+            "required_lookups": [
+                {"ticker": ticker, "metric": metric["metric_name"], "period": p1},
+                {"ticker": ticker, "metric": metric["metric_name"], "period": p2},
+            ]
+        }
+        return {"input": prefix, "ground_truth": completion, "metadata": metadata}
     return None
 
 async def generate_cagr_case(tickers: List[str], metrics: List[Dict[str, str]]):
@@ -199,7 +273,15 @@ async def generate_cagr_case(tickers: List[str], metrics: List[Dict[str, str]]):
         company = await get_company_name(ticker)
         prefix = f"The CAGR of {metric['description'].lower()} for {company} from {start} to {end} is "
         completion = f"{cagr:.1f}%"
-        return {"input": prefix, "ground_truth": completion}
+        metadata = {
+            "type": "cagr",
+            "required_lookups": [
+                {"ticker": ticker, "metric": metric["metric_name"], "period": start},
+                {"ticker": ticker, "metric": metric["metric_name"], "period": end},
+            ],
+            "calc": {"operation": "CAGR", "duration": years}
+        }
+        return {"input": prefix, "ground_truth": completion, "metadata": metadata}
     return None
 
 async def generate_cross_ticker_difference_case(tickers: List[str], metrics: List[Dict[str, str]]):
@@ -230,14 +312,12 @@ async def generate_cross_ticker_difference_case(tickers: List[str], metrics: Lis
         templates_with_period = [
             "The difference in {desc} between {c1} and {c2} in {period} was ",
             "In {period}, the {desc} gap between {c1} and {c2} was ",
-            "{c1} vs {c2} {desc} difference in {period}: ",
         ]
         
         # Templates without period (use latest matching)
         templates_without_period = [
             "The difference in {desc} between {c1} and {c2} is ",
             "The {desc} gap between {c1} and {c2} is ",
-            "{c1} vs {c2} {desc} difference: ",
         ]
         
         use_period_template = random.random() < 0.6
@@ -264,35 +344,42 @@ async def generate_cross_ticker_difference_case(tickers: List[str], metrics: Lis
         # Don't use abs() - keep the actual difference
         diff = v1["value"] - v2["value"]
         completion = format_value(diff, v1.get("unit"))
-        return {"input": prefix, "ground_truth": completion}
+        metadata = {
+            "type": "cross_ticker_difference",
+            "required_lookups": [
+                {"ticker": t1, "metric": metric["metric_name"], "period": period},
+                {"ticker": t2, "metric": metric["metric_name"], "period": period},
+            ]
+        }
+        return {"input": prefix, "ground_truth": completion, "metadata": metadata}
     return None
 
-# Predefined calculation combinations
+# Predefined calculation combinations (avoid duplicates of raw metrics)
 CALC_COMBOS = [
     {
-        "m1": "netinc", "m2": "revenue",
+        "m1": "opinc", "m2": "revenue",
         "operation": "divide", "unit": "percentage",
-        "description": "net profit margin"
+        "description": "operating margin"
     },
     {
-        "m1": "grossProfit", "m2": "revenue",
+        "m1": "ebitda", "m2": "revenue",
         "operation": "divide", "unit": "percentage",
-        "description": "gross margin"
+        "description": "EBITDA margin"
     },
     {
-        "m1": "debt", "m2": "equity",
+        "m1": "freeCashFlow", "m2": "revenue",
+        "operation": "divide", "unit": "percentage",
+        "description": "free cash flow margin"
+    },
+    {
+        "m1": "capex", "m2": "revenue",
+        "operation": "divide", "unit": "percentage",
+        "description": "capex to revenue"
+    },
+    {
+        "m1": "debt", "m2": "ebitda",
         "operation": "divide", "unit": "ratio",
-        "description": "debt to equity ratio"
-    },
-    {
-        "m1": "revenue", "m2": "costRev",
-        "operation": "subtract", "unit": "USD_billions",
-        "description": "gross profit (calculated)"
-    },
-    {
-        "m1": "freeCashFlow", "m2": "capex",
-        "operation": "add", "unit": "USD_billions",
-        "description": "operating cash flow approximation"
+        "description": "debt to EBITDA"
     },
 ]
 
@@ -345,7 +432,15 @@ async def generate_multi_metric_calc_case(tickers: List[str], metrics: List[Dict
             continue
         
         completion = format_value(result, combo["unit"])
-        return {"input": prefix, "ground_truth": completion}
+        metadata = {
+            "type": "calc",
+            "required_lookups": [
+                {"ticker": ticker, "metric": combo["m1"], "period": period},
+                {"ticker": ticker, "metric": combo["m2"], "period": period},
+            ],
+            "calc": {"operation": combo["operation"], "duration": None}
+        }
+        return {"input": prefix, "ground_truth": completion, "metadata": metadata}
     return None
 
 # No-completion prefixes
@@ -388,7 +483,8 @@ async def generate_no_completion_case(tickers: List[str], metrics: List[Dict[str
             desc=metric["description"].lower(),
             period=period or "the last quarter"
         )
-    return {"input": prefix, "ground_truth": "NO_COMPLETION_NEEDED"}
+    metadata = {"type": "no_completion", "required_lookups": []}
+    return {"input": prefix, "ground_truth": "NO_COMPLETION_NEEDED", "metadata": metadata}
 
 # ============== Main Generation Function ==============
 

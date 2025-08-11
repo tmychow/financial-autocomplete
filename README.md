@@ -51,18 +51,22 @@ Open http://localhost:8000 to:
 
 Open `finance_rl.ipynb` in Jupyter or Google Colab to train a model with RL.
 
-Reward signal: training uses the LLM-as-judge correctness score only.
+Reward signal: LLM-as-judge correctness plus tool-use bonuses:
+- Used `get_value`
+- Coverage of required lookups
+- Separate sub-scores for correct ticker, metric, period
 
 ## Files
 
 - **`database.py`** - Database setup with Tiingo statements + daily data endpoints
 - **`synthetic.py`** - Generates test cases from database
-- **`environment.py`** - Financial tool execution
+- **`environment.py`** - Financial tool execution (tools: `get_value`, `calculate`, `return_answer`)
 - **`agent.py`** - Multi-turn LLM agent
-- **`rewards.py`** - LLM-as-judge evaluation
+- **`rewards.py`** - LLM-as-judge evaluation + tool-use and lookup-coverage bonuses
 - **`rollout.py`** - Training trajectory generation
 - **`server.py`** - FastAPI test server
 - **`index.html`** - Web interface
+  - Supports OpenAI models (`gpt-...`) and local Ollama models (`ollama:<model_name>`, e.g., `ollama:qwen2.5:3b-instruct`)
 
 ## Data Coverage
 
@@ -72,3 +76,9 @@ The system fetches comprehensive financial data using exact Tiingo field names:
 - **Cash Flow**: freeCashFlow, ncfo, capex, payDiv, etc.
 - **Market Data**: marketCap, peRatio, pbRatio, trailingPEG1Y
 - **Calculated Metrics**: roe, roa, grossMargin, currentRatio, etc.
+
+## TODO
+
+- [ ] Resume from checkpoint
+- [ ] Log trajectories to wandb
+- [ ] Ollama local model support for evals

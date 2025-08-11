@@ -7,14 +7,12 @@ from typing import Dict, List, Optional, Tuple, Any
 from enum import Enum
 from datetime import datetime
 from database import (
-    get_all_tickers, get_tickers_with_names, get_all_metrics,
+    get_tickers_with_names, get_all_metrics,
     get_financial_value, get_available_periods, get_latest_period
 )
 
 class ToolName(Enum):
     """Available tools in the financial environment"""
-    GET_METRICS = "get_metrics"
-    GET_TICKERS = "get_tickers"
     GET_VALUE = "get_value"
     CALCULATE = "calculate"
     RETURN_ANSWER = "return_answer"
@@ -45,6 +43,9 @@ class FinancialEnvironment:
         self.tool_calls: List[ToolCall] = []
         self.episode_complete = False
         self.final_answer = None
+        # Lazy-loaded alias maps
+        self._ticker_alias_map: Optional[Dict[str, str]] = None
+        self._metric_alias_map: Optional[Dict[str, str]] = None
         
     async def execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
         """
@@ -59,11 +60,7 @@ class FinancialEnvironment:
         """
         result = None
         
-        if tool_name == ToolName.GET_METRICS.value:
-            result = await self._get_metrics()
-        elif tool_name == ToolName.GET_TICKERS.value:
-            result = await self._get_tickers()
-        elif tool_name == ToolName.GET_VALUE.value:
+        if tool_name == ToolName.GET_VALUE.value:
             # Require all args before calling
             required = ["metric", "ticker", "period"]
             if not all(k in arguments and isinstance(arguments[k], str) and arguments[k].strip() for k in required):
@@ -91,22 +88,6 @@ class FinancialEnvironment:
         
         return result
     
-    async def _get_metrics(self) -> List[Dict[str, str]]:
-        """Get all available financial metrics"""
-        metrics = await get_all_metrics()
-        return [
-            {
-                "name": m["metric_name"],
-                "description": m["description"],
-                "unit": m["unit"]
-            }
-            for m in metrics
-        ]
-    
-    async def _get_tickers(self) -> List[Dict[str, str]]:
-        """Get all available stock tickers with company names"""
-        return await get_tickers_with_names()
-    
     async def _get_value(self, metric: str, ticker: str, period: str) -> Optional[Dict[str, Any]]:
         """
         Get a specific financial value
@@ -116,23 +97,226 @@ class FinancialEnvironment:
             ticker: Stock ticker (e.g., "AAPL")
             period: Time period (e.g., "2023Q4" or "latest")
         """
-        # Handle "latest" period request
-        if period.lower() == "latest":
-            actual_period = await get_latest_period(ticker, metric)
+        # Normalize inputs
+        norm_ticker = await self._normalize_ticker(ticker)
+        if not norm_ticker:
+            return f"Invalid ticker: {ticker}"
+
+        norm_metric = await self._normalize_metric(metric)
+        if not norm_metric:
+            return f"Invalid metric: {metric}"
+
+        norm_period = await self._normalize_period(period, norm_ticker, norm_metric)
+        if not norm_period:
+            return f"Invalid period: {period}"
+
+        # Resolve 'latest' to concrete period if needed (normalize_period may already do this)
+        if norm_period.lower() == "latest":
+            actual_period = await get_latest_period(norm_ticker, norm_metric)
             if actual_period:
-                period = actual_period
+                norm_period = actual_period
             else:
                 return None
-        
-        value_data = await get_financial_value(ticker, metric, period)
+
+        value_data = await get_financial_value(norm_ticker, norm_metric, norm_period)
         
         if value_data:
             # Add the period to the result for clarity
-            value_data["period"] = period
-            value_data["ticker"] = ticker
-            value_data["metric"] = metric
+            value_data["period"] = norm_period
+            value_data["ticker"] = norm_ticker
+            value_data["metric"] = norm_metric
         
         return value_data
+
+    async def _ensure_alias_maps(self):
+        """Load alias maps for tickers and metrics on first use."""
+        if self._ticker_alias_map is None:
+            # Build ticker alias map
+            self._ticker_alias_map = {}
+            try:
+                rows = await get_tickers_with_names()
+            except Exception:
+                rows = []
+            for row in rows or []:
+                tkr = row.get("ticker", "").strip()
+                name = row.get("company_name", "").strip()
+                if not tkr:
+                    continue
+                # direct ticker
+                self._ticker_alias_map[tkr.lower()] = tkr
+                # exact company name
+                if name:
+                    self._ticker_alias_map[name.lower()] = tkr
+                    # also store basic cleaned variants
+                    simplified = name.lower().replace(",", "").replace(".", "").replace(" inc", "").replace(" corporation", "").replace(" corp", "").replace(" limited", "").replace(" n.v", "").strip()
+                    self._ticker_alias_map[simplified] = tkr
+            # manual aliases
+            manual = {
+                "google": "GOOGL",
+                "alphabet": "GOOGL",
+                "facebook": "META",
+                "meta": "META",
+                "tesla": "TSLA",
+                "nvidia": "NVDA",
+                "broadcom": "AVGO",
+                "taiwan semiconductor": "TSM",
+            }
+            for k, v in manual.items():
+                self._ticker_alias_map.setdefault(k, v)
+
+        if self._metric_alias_map is None:
+            # Build metric alias map
+            self._metric_alias_map = {}
+            try:
+                metrics = await get_all_metrics()
+            except Exception:
+                metrics = []
+            for m in metrics or []:
+                code = m.get("metric_name", "").strip()
+                desc = m.get("description", "").strip()
+                if not code:
+                    continue
+                self._metric_alias_map[code.lower()] = code
+                if desc:
+                    self._metric_alias_map[desc.lower()] = code
+            # manual synonyms
+            manual_metric_aliases = {
+                # income
+                "revenue": "revenue",
+                "net income": "netinc",
+                "eps": "eps",
+                "earnings per share": "eps",
+                "diluted eps": "epsDil",
+                "eps diluted": "epsDil",
+                "ebitda": "ebitda",
+                "ebit": "ebit",
+                "r&d": "rnd",
+                "research and development": "rnd",
+                "sg&a": "sga",
+                "selling general administrative": "sga",
+                "operating income": "opinc",
+                "cost of revenue": "costRev",
+                "gross profit": "grossProfit",
+                "operating expenses": "opex",
+                # balance
+                "assets": "assets",
+                "ppe": "ppeq",
+                "pp&e": "ppeq",
+                "accounts receivable": "acctRec",
+                "cash and equivalents": "cashAndEq",
+                "current assets": "assetsCurrent",
+                "inventory": "inventory",
+                "accounts payable": "acctPay",
+                "total liabilities": "totalLiabilities",
+                "equity": "equity",
+                "deferred revenue": "deferredRev",
+                "debt": "debt",
+                # cash flow
+                "free cash flow": "freeCashFlow",
+                "dividends paid": "payDiv",
+                "depreciation and amortization": "depamor",
+                "capex": "capex",
+                "net cash from ops": "ncfo",
+                "net cash from investing": "ncfi",
+                "net cash from financing": "ncff",
+                "stock based compensation": "sbcomp",
+                # overview/ratios
+                "revenue qoq": "revenueQoQ",
+                "revenue growth qoq": "revenueQoQ",
+                "gross margin": "grossMargin",
+                "profit margin": "profitMargin",
+                "debt to equity": "debtEquity",
+                "long term debt to equity": "longTermDebtEquity",
+                "roe": "roe",
+                "return on equity": "roe",
+                "roa": "roa",
+                "return on assets": "roa",
+                "book value per share": "bvps",
+                "book value": "bookVal",
+                "revenue per share": "rps",
+                # market/daily
+                "market cap": "marketCap",
+                "price to earnings": "peRatio",
+                "p/e": "peRatio",
+                "pe": "peRatio",
+                "price to book": "pbRatio",
+                "pb": "pbRatio",
+                "peg": "trailingPEG1Y",
+            }
+            for k, v in manual_metric_aliases.items():
+                self._metric_alias_map.setdefault(k, v)
+
+    async def _normalize_ticker(self, raw: str) -> Optional[str]:
+        await self._ensure_alias_maps()
+        if not raw:
+            return None
+        s = raw.strip().lower()
+        if s in self._ticker_alias_map:
+            return self._ticker_alias_map[s]
+        # substring match on company names in alias map keys (which includes names)
+        best = None
+        for alias, tkr in self._ticker_alias_map.items():
+            if alias != tkr.lower() and s in alias:
+                best = tkr
+                break
+        return best
+
+    async def _normalize_metric(self, raw: str) -> Optional[str]:
+        await self._ensure_alias_maps()
+        if not raw:
+            return None
+        s = raw.strip().lower()
+        if s in self._metric_alias_map:
+            return self._metric_alias_map[s]
+        # try removing spaces and punctuation
+        compact = s.replace(" ", "").replace("-", "")
+        for alias in list(self._metric_alias_map.keys()):
+            if alias.replace(" ", "").replace("-", "") == compact:
+                return self._metric_alias_map[alias]
+        return None
+
+    async def _normalize_period(self, raw: str, ticker: str, metric: str) -> Optional[str]:
+        if not raw:
+            return None
+        s = raw.strip().lower()
+        if s in {"latest", "most recent"}:
+            return "latest"
+        # FY patterns
+        import re as _re
+        fy_match = _re.fullmatch(r"(fy)?(\d{4})(fy)?", s)
+        if fy_match:
+            year = fy_match.group(2)
+            return f"{year}FY"
+        # Quarter patterns like Q4 2023, 2023 Q4, 2023Q4
+        q_match = _re.fullmatch(r"q([1-4])\s*(\d{4})", s)
+        if q_match:
+            q = q_match.group(1)
+            year = q_match.group(2)
+            return f"{year}Q{q}"
+        q_match2 = _re.fullmatch(r"(\d{4})\s*q([1-4])", s)
+        if q_match2:
+            year = q_match2.group(1)
+            q = q_match2.group(2)
+            return f"{year}Q{q}"
+        q_match3 = _re.fullmatch(r"(\d{4})q([1-4])", s)
+        if q_match3:
+            year = q_match3.group(1)
+            q = q_match3.group(2)
+            return f"{year}Q{q}"
+        # As a fallback, try to match by year and optional quarter tokens within available periods
+        try:
+            periods = await get_available_periods(ticker, metric)
+        except Exception:
+            periods = []
+        tokens = s.replace(",", " ").replace("/", " ").split()
+        year_tokens = [t for t in tokens if t.isdigit() and len(t) == 4]
+        quarter_tokens = [t for t in tokens if t in {"q1", "q2", "q3", "q4", "1", "2", "3", "4"}]
+        for p in periods:
+            if year_tokens and year_tokens[0] not in p:
+                continue
+            if any(q in p.lower() for q in quarter_tokens) or not quarter_tokens:
+                return p
+        return None
     
     def _calculate(
         self,
@@ -243,8 +427,6 @@ def parse_tool_calls_from_response(response: str) -> List[Dict[str, Any]]:
     
     # Define function signatures and their expected parameters
     tool_signatures = {
-        "get_metrics": [],
-        "get_tickers": [],
         "get_value": ["metric", "ticker", "period"],
         "calculate": ["num1", "num2", "operation", "duration"],
         "return_answer": ["answer"]
@@ -286,10 +468,7 @@ def parse_tool_calls_from_response(response: str) -> List[Dict[str, Any]]:
             # Parse arguments
             parsed_args = {}
             
-            if not args_str:  # No arguments
-                if tool_name in ["get_metrics", "get_tickers"]:
-                    tool_calls.append({"tool": tool_name, "args": {}})
-            else:
+            if args_str:
                 # Special handling for return_answer
                 if tool_name == "return_answer":
                     answer = args_str
@@ -373,21 +552,18 @@ if __name__ == "__main__":
         # Test tool executions
         print("Testing Financial Environment...")
         
-        # Get metrics
-        metrics = await env.execute_tool("get_metrics", {})
-        print(f"Found {len(metrics)} metrics")
-        
-        # Get tickers
-        tickers = await env.execute_tool("get_tickers", {})
-        print(f"Found {len(tickers)} tickers")
-        
-        # Get a value
-        if tickers and metrics:
-            value = await env.execute_tool(
-                "get_value",
-                {"metric": "revenue", "ticker": "AAPL", "period": "2023FY"}
-            )
-            print(f"AAPL 2023FY revenue: {value}")
+        # Get a value with flexible inputs
+        value = await env.execute_tool(
+            "get_value",
+            {"metric": "net income", "ticker": "Apple", "period": "2023"}
+        )
+        print(f"Apple 2023 net income: {value}")
+
+        value2 = await env.execute_tool(
+            "get_value",
+            {"metric": "price to earnings", "ticker": "alphabet", "period": "latest"}
+        )
+        print(f"Alphabet latest P/E: {value2}")
         
         # Calculate
         result = await env.execute_tool(

@@ -107,6 +107,8 @@ async def calculate_reward(
     prediction: Optional[str],
     ground_truth: str,
     episode_info: Dict[str, Any],
+    tool_calls: Optional[List[Dict[str, Any]]] = None,
+    case_metadata: Optional[Dict[str, Any]] = None,
     use_judge: bool = True,
     judge_model: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -133,8 +135,102 @@ async def calculate_reward(
         correctness_score = 1.0 if is_correct else 0.0
         reasoning = "Simple string match evaluation"
     
-    # Use only LLM judge score as the reward
-    total_reward = correctness_score
+    # Additional reward components
+    # Weights (configurable via env)
+    W_JUDGE = float(os.getenv("W_JUDGE", "1.0"))
+    W_USED_GET_VALUE = float(os.getenv("W_USED_GET_VALUE", "0.1"))
+    # Keep combined coverage available but default to 0 (replaced by separate components)
+    W_COVERAGE = float(os.getenv("W_COVERAGE", "0.0"))
+    # New separate components
+    W_TICKER = float(os.getenv("W_TICKER", "0.0667"))
+    W_METRIC = float(os.getenv("W_METRIC", "0.0667"))
+    W_PERIOD = float(os.getenv("W_PERIOD", "0.0666"))
+
+    # Determine if this is a no-completion case
+    case_type = (case_metadata or {}).get("type") if isinstance(case_metadata, dict) else None
+    is_no_completion = case_type == "no_completion" or ground_truth == "NO_COMPLETION_NEEDED"
+
+    # Used get_value flag
+    used_get_value = 0.0
+    lookup_coverage = 0.0
+    ticker_correct = 0.0
+    metric_correct = 0.0
+    period_correct = 0.0
+
+    if tool_calls and not is_no_completion:
+        used_get_value = 1.0 if any(tc.get("tool") == "get_value" for tc in tool_calls) else 0.0
+        # Build observed lookups from results
+        observed = set()
+        for tc in tool_calls:
+            if tc.get("tool") == "get_value":
+                res = tc.get("result")
+                if isinstance(res, dict):
+                    mt = res.get("metric")
+                    tk = res.get("ticker")
+                    pr = res.get("period")
+                    if mt and tk and pr:
+                        observed.add((tk, mt, pr))
+        # Compute coverage against required_lookups
+        required = []
+        if isinstance(case_metadata, dict):
+            required = case_metadata.get("required_lookups") or []
+        required_tuples = []
+        for req in required:
+            tk = req.get("ticker")
+            mt = req.get("metric")
+            pr = req.get("period")
+            if tk and mt and pr:
+                if isinstance(pr, str) and pr.lower() == "latest":
+                    # If requirement is latest, consider any observed tuple with same tk/mt as match
+                    # (concrete period will be in observed)
+                    # Represent latest with wildcard marker
+                    required_tuples.append((tk, mt, "*latest*"))
+                else:
+                    required_tuples.append((tk, mt, pr))
+        matched = 0
+        total = len(required_tuples)
+        if total > 0:
+            for r in required_tuples:
+                if r[2] == "*latest*":
+                    if any((tk, mt) == (r[0], r[1]) for tk, mt, _ in observed):
+                        matched += 1
+                else:
+                    if (r[0], r[1], r[2]) in observed:
+                        matched += 1
+            lookup_coverage = matched / total if total else 0.0
+
+            # Separate components: ticker, metric, period correctness
+            # ticker_correct: for each required, did any observed call contain the required ticker (regardless of metric/period)?
+            ticker_hits = 0
+            metric_hits = 0
+            period_hits = 0
+            observed_tickers = {tk for (tk, _, __) in observed}
+            observed_metrics = {mt for (_, mt, __) in observed}
+            for tk, mt, pr in required_tuples:
+                if tk in observed_tickers:
+                    ticker_hits += 1
+                if mt in observed_metrics:
+                    metric_hits += 1
+                # Period check: if "latest", accept any observed with same (tk, mt)
+                if pr == "*latest*":
+                    if any((otk, omt) == (tk, mt) for (otk, omt, opr) in observed):
+                        period_hits += 1
+                else:
+                    if any(opr == pr for (_, _, opr) in observed):
+                        period_hits += 1
+            ticker_correct = ticker_hits / total
+            metric_correct = metric_hits / total
+            period_correct = period_hits / total
+
+    # Total reward
+    total_reward = (
+        W_JUDGE * correctness_score
+        + (0.0 if is_no_completion else W_USED_GET_VALUE * used_get_value)
+        + (0.0 if is_no_completion else W_COVERAGE * lookup_coverage)
+        + (0.0 if is_no_completion else W_TICKER * ticker_correct)
+        + (0.0 if is_no_completion else W_METRIC * metric_correct)
+        + (0.0 if is_no_completion else W_PERIOD * period_correct)
+    )
 
     return {
         "total_reward": total_reward,
@@ -145,6 +241,11 @@ async def calculate_reward(
         "max_turns_reached": max_turns_reached,
         "error_occurred": error_occurred,
         "reasoning": reasoning,
+        "used_get_value": used_get_value,
+        "lookup_coverage": lookup_coverage,
+        "ticker_correct": ticker_correct,
+        "metric_correct": metric_correct,
+        "period_correct": period_correct,
     }
 
 # ============== Batch Reward Calculation ==============
@@ -153,6 +254,8 @@ async def calculate_batch_rewards(
     predictions: List[Optional[str]],
     ground_truths: List[str],
     episode_infos: List[Dict[str, Any]],
+    tool_calls_list: Optional[List[List[Dict[str, Any]]]] = None,
+    case_metadatas: Optional[List[Dict[str, Any]]] = None,
     use_judge: bool = True,
     judge_model: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
@@ -170,9 +273,12 @@ async def calculate_batch_rewards(
     """
     rewards = []
     
-    for pred, truth, info in zip(predictions, ground_truths, episode_infos):
+    tool_calls_list = tool_calls_list or [None] * len(predictions)
+    case_metadatas = case_metadatas or [None] * len(predictions)
+
+    for pred, truth, info, tcs, meta in zip(predictions, ground_truths, episode_infos, tool_calls_list, case_metadatas):
         reward = await calculate_reward(
-            pred, truth, info, use_judge=use_judge, judge_model=judge_model
+            pred, truth, info, tool_calls=tcs, case_metadata=meta, use_judge=use_judge, judge_model=judge_model
         )
         rewards.append(reward)
     

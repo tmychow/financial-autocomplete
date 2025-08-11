@@ -17,5 +17,8 @@ tqdm>=4.65.0
 # LLM API for testing (set OPENAI_API_KEY env var)
 openai>=1.0.0
 
+# Ollama
+ollama
+
 # Environment variable loading
 python-dotenv>=0.19.0

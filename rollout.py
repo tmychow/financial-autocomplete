@@ -71,6 +71,8 @@ async def run_single_rollout(
             completion,
             test_case["ground_truth"],
             episode_info,
+            tool_calls=tool_calls,
+            case_metadata=test_case.get("metadata"),
             use_judge=use_judge,
             judge_model=judge_model,
         )
@@ -88,7 +90,9 @@ async def run_single_rollout(
             "completed": 1.0 if episode_info["completed"] else 0.0,
             "latency": latency,
             "step": step,
-            "rollout_id": rollout_id
+            "rollout_id": rollout_id,
+            "used_get_value": reward_info.get("used_get_value", 0.0),
+            "lookup_coverage": reward_info.get("lookup_coverage", 0.0),
         }
         
         # Create ART trajectory
