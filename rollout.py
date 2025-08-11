@@ -80,8 +80,6 @@ async def run_single_rollout(
         metrics = {
             "reward": reward_info["total_reward"],
             "correctness": reward_info["correctness_score"],
-            "efficiency_bonus": reward_info["efficiency_bonus"],
-            "completion_penalty": reward_info["completion_penalty"],
             "is_correct": 1.0 if reward_info["is_correct"] else 0.0,
             "num_tool_calls": episode_info["tool_calls_count"],
             "num_turns": episode_info["turns"],

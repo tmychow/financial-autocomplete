@@ -64,13 +64,26 @@ class FinancialEnvironment:
         elif tool_name == ToolName.GET_TICKERS.value:
             result = await self._get_tickers()
         elif tool_name == ToolName.GET_VALUE.value:
-            result = await self._get_value(**arguments)
+            # Require all args before calling
+            required = ["metric", "ticker", "period"]
+            if not all(k in arguments and isinstance(arguments[k], str) and arguments[k].strip() for k in required):
+                result = "Invalid tool usage: get_value expects metric, ticker, and period."
+            else:
+                result = await self._get_value(**arguments)
         elif tool_name == ToolName.CALCULATE.value:
-            result = self._calculate(**arguments)
+            # Require num1, num2, operation before calling
+            required = ["num1", "num2", "operation"]
+            if not all(k in arguments for k in required):
+                result = "Invalid tool usage: calculate expects num1, num2, and operation."
+            else:
+                result = self._calculate(**arguments)
         elif tool_name == ToolName.RETURN_ANSWER.value:
-            result = self._return_answer(**arguments)
-            self.episode_complete = True
-            self.final_answer = result
+            if "answer" not in arguments:
+                result = "Invalid tool usage: return_answer expects answer."
+            else:
+                result = self._return_answer(**arguments)
+                self.episode_complete = True
+                self.final_answer = result
         
         # Record the tool call
         tool_call = ToolCall(tool_name, arguments, result)
@@ -220,6 +233,14 @@ def parse_tool_calls_from_response(response: str) -> List[Dict[str, Any]]:
     """
     tool_calls = []
     
+    def _is_strict_number(value: Any) -> bool:
+        """Return True only for plain numeric literals (ints/floats as types, or numeric-looking strings)."""
+        if isinstance(value, (int, float)):
+            return True
+        if isinstance(value, str):
+            return re.fullmatch(r"\s*-?\d+(?:\.\d+)?\s*", value) is not None
+        return False
+    
     # Define function signatures and their expected parameters
     tool_signatures = {
         "get_metrics": [],
@@ -312,18 +333,14 @@ def parse_tool_calls_from_response(response: str) -> List[Dict[str, Any]]:
                                         break
                                 parsed_args[params[i]] = val
                 
-                # Convert types for calculate function (tolerant to bad inputs)
+                # Convert types for calculate function (strict numeric acceptance)
                 if tool_name == "calculate" and parsed_args:
                     if "num1" in parsed_args:
-                        try:
-                            parsed_args["num1"] = float(parsed_args["num1"])  # may be string
-                        except (ValueError, TypeError):
-                            parsed_args["num1"] = None
+                        val1 = parsed_args["num1"]
+                        parsed_args["num1"] = float(val1) if _is_strict_number(val1) else None
                     if "num2" in parsed_args:
-                        try:
-                            parsed_args["num2"] = float(parsed_args["num2"])  # may be string
-                        except (ValueError, TypeError):
-                            parsed_args["num2"] = None
+                        val2 = parsed_args["num2"]
+                        parsed_args["num2"] = float(val2) if _is_strict_number(val2) else None
                     if "duration" in parsed_args:
                         duration_val = parsed_args["duration"]
                         if duration_val and str(duration_val).lower() != 'none':

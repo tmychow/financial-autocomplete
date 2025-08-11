@@ -106,13 +106,14 @@ class AutocompleteAgent:
             else:
                 response_text = response
             
+            # Add assistant response to history FIRST so we always have a matching assistant turn
+            # for any Choice/logprob object returned by the model (required by ART tokenization).
+            self.conversation.append({"role": "assistant", "content": response_text})
+
             # Check if no completion needed
             if "NO_COMPLETION_NEEDED" in response_text:
                 await self.environment.execute_tool("return_answer", {"answer": "NO_COMPLETION_NEEDED"})
                 break
-            
-            # Add assistant response to history
-            self.conversation.append({"role": "assistant", "content": response_text})
             
             # Parse tool calls
             tool_calls = parse_tool_calls_from_response(response_text)

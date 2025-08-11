@@ -51,7 +51,7 @@ Open http://localhost:8000 to:
 
 Open `finance_rl.ipynb` in Jupyter or Google Colab to train a model with RL.
 
-Reward signal: training uses the LLM-as-judge correctness score only. Efficiency and completion penalties may be logged for analysis but do not affect optimization.
+Reward signal: training uses the LLM-as-judge correctness score only.
 
 ## Files
 

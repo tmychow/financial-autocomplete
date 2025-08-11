@@ -103,81 +103,14 @@ Please respond with your judgment in the following XML format:
         score = 1.0 if is_correct else 0.0
         return is_correct, f"Fallback evaluation due to error: {str(e)}", score
 
-def calculate_efficiency_bonus(
-    num_tool_calls: int,
-    completed: bool,
-    max_expected_calls: int = 6
-) -> float:
-    """
-    Calculate efficiency bonus based on number of tool calls
-    
-    Args:
-        num_tool_calls: Number of tool calls made
-        completed: Whether the episode completed successfully
-        max_expected_calls: Maximum expected number of calls for simple tasks
-        
-    Returns:
-        Efficiency bonus (0.0 to 0.2)
-    """
-    if not completed:
-        return 0.0
-    
-    # Fewer calls is better
-    if num_tool_calls <= max_expected_calls:
-        # Linear bonus from 0.2 (at 1 call) to 0.0 (at max_expected_calls)
-        return max(0.0, 0.2 * (1 - (num_tool_calls - 1) / max_expected_calls))
-    else:
-        # Penalty for too many calls
-        return max(-0.2, -0.05 * (num_tool_calls - max_expected_calls))
-
-def calculate_completion_penalty(
-    completed: bool,
-    max_turns_reached: bool,
-    error_occurred: bool = False
-) -> float:
-    """
-    Calculate penalty for incomplete or error episodes
-    
-    Args:
-        completed: Whether episode completed with return_answer
-        max_turns_reached: Whether max turns was reached
-        error_occurred: Whether an error occurred
-        
-    Returns:
-        Penalty value (negative)
-    """
-    if error_occurred:
-        return -1.0  # Severe penalty for errors
-    
-    if not completed:
-        if max_turns_reached:
-            return -0.5  # Moderate penalty for timeout
-        else:
-            return -0.3  # Smaller penalty for other incompletions
-    
-    return 0.0
-
 async def calculate_reward(
     prediction: Optional[str],
     ground_truth: str,
     episode_info: Dict[str, Any],
     use_judge: bool = True,
-    efficiency_weight: float = 0.2,
-    completion_weight: float = 0.3
 ) -> Dict[str, Any]:
     """
-    Calculate comprehensive reward for an autocomplete episode
-    
-    Args:
-        prediction: Model's predicted completion
-        ground_truth: Expected completion
-        episode_info: Information about the episode (turns, tool_calls, etc.)
-        use_judge: Whether to use LLM judge (vs simple match)
-        efficiency_weight: Weight for efficiency bonus
-        completion_weight: Weight for completion penalty
-        
-    Returns:
-        Dictionary with reward components and total reward
+    Calculate reward for an autocomplete episode using correctness only.
     """
     # Extract episode information
     num_tool_calls = episode_info.get("tool_calls_count", 0)
@@ -196,31 +129,18 @@ async def calculate_reward(
         correctness_score = 1.0 if is_correct else 0.0
         reasoning = "Simple string match evaluation"
     
-    # Calculate efficiency bonus
-    efficiency_bonus = calculate_efficiency_bonus(num_tool_calls, completed)
-    
-    # Calculate completion penalty
-    completion_penalty = calculate_completion_penalty(
-        completed, max_turns_reached, error_occurred
-    )
-    
     # Use only LLM judge score as the reward
     total_reward = correctness_score
-    
+
     return {
         "total_reward": total_reward,
         "correctness_score": correctness_score,
         "is_correct": is_correct,
-        "efficiency_bonus": efficiency_bonus,
-        "completion_penalty": completion_penalty,
         "num_tool_calls": num_tool_calls,
         "completed": completed,
+        "max_turns_reached": max_turns_reached,
+        "error_occurred": error_occurred,
         "reasoning": reasoning,
-        "components": {
-            "base": correctness_score,
-            "efficiency": efficiency_weight * efficiency_bonus,
-            "completion": completion_weight * completion_penalty
-        }
     }
 
 # ============== Batch Reward Calculation ==============
@@ -315,8 +235,6 @@ if __name__ == "__main__":
             
             print(f"  Reward (no judge): {reward['total_reward']:.3f}")
             print(f"    - Correctness: {reward['correctness_score']:.3f}")
-            print(f"    - Efficiency: {reward['efficiency_bonus']:.3f}")
-            print(f"    - Completion: {reward['completion_penalty']:.3f}")
             
             # Uncomment to test with judge (requires OpenAI API key)
             # reward_with_judge = await calculate_reward(
