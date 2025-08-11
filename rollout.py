@@ -38,7 +38,8 @@ async def run_single_rollout(
     rollout_id: int,
     step: int,
     use_judge: bool = True,
-    max_turns: int = 10
+    max_turns: int = 10,
+    judge_model: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Run a single autocomplete rollout
@@ -70,7 +71,8 @@ async def run_single_rollout(
             completion,
             test_case["ground_truth"],
             episode_info,
-            use_judge=use_judge
+            use_judge=use_judge,
+            judge_model=judge_model,
         )
         
         # Build ART trajectory
@@ -121,7 +123,8 @@ async def conduct_rollouts(
     test_cases: List[Dict[str, str]],
     num_rollouts_per_case: int,
     step: int,
-    use_judge: bool = True
+    use_judge: bool = True,
+    judge_model: Optional[str] = None,
 ) -> List[art.TrajectoryGroup]:
     """
     Conduct multiple rollouts for a set of test cases
@@ -152,7 +155,8 @@ async def conduct_rollouts(
                     test_case=test_case,
                     rollout_id=rollout_id,
                     step=step,
-                    use_judge=use_judge
+                    use_judge=use_judge,
+                    judge_model=judge_model,
                 )
             )
             rollout_id += 1
@@ -179,7 +183,8 @@ async def run_validation(
     benchmark_model: Any,
     num_validation_cases: int = 50,
     step: int = 0,
-    use_judge: bool = True
+    use_judge: bool = True,
+    judge_model: Optional[str] = None,
 ) -> List[art.Trajectory]:
     """
     Run validation against a benchmark model
@@ -206,7 +211,8 @@ async def run_validation(
             test_case=test_case,
             rollout_id=i,
             step=step,
-            use_judge=use_judge
+            use_judge=use_judge,
+            judge_model=judge_model,
         )
         
         benchmark_result = await run_single_rollout(
@@ -214,7 +220,8 @@ async def run_validation(
             test_case=test_case,
             rollout_id=i + 1000,  # Different ID space
             step=step,
-            use_judge=use_judge
+            use_judge=use_judge,
+            judge_model=judge_model,
         )
         
         if my_result["success"] and my_result["trajectory"]:
@@ -240,7 +247,8 @@ async def generate_training_trajectories(
     num_cases: int = 10,
     num_rollouts_per_case: int = 5,
     step: int = 0,
-    use_judge: bool = True
+    use_judge: bool = True,
+    judge_model: Optional[str] = None,
 ) -> Tuple[List[art.TrajectoryGroup], Dict[str, float]]:
     """
     Generate training trajectories for a training step
@@ -264,7 +272,8 @@ async def generate_training_trajectories(
         test_cases=test_cases,
         num_rollouts_per_case=num_rollouts_per_case,
         step=step,
-        use_judge=use_judge
+        use_judge=use_judge,
+        judge_model=judge_model,
     )
     
     # Calculate metrics

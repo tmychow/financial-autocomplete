@@ -108,6 +108,7 @@ async def calculate_reward(
     ground_truth: str,
     episode_info: Dict[str, Any],
     use_judge: bool = True,
+    judge_model: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Calculate reward for an autocomplete episode using correctness only.
@@ -120,8 +121,11 @@ async def calculate_reward(
     
     # Calculate correctness score using judge
     if use_judge:
+        # Allow explicit argument to override env variable, which overrides default
+        if judge_model is None:
+            judge_model = os.getenv("JUDGE_MODEL", "gpt-4.1")
         is_correct, reasoning, correctness_score = await evaluate_completion_with_judge(
-            prediction, ground_truth
+            prediction, ground_truth, judge_model
         )
     else:
         # Simple string matching fallback
@@ -149,7 +153,8 @@ async def calculate_batch_rewards(
     predictions: List[Optional[str]],
     ground_truths: List[str],
     episode_infos: List[Dict[str, Any]],
-    use_judge: bool = True
+    use_judge: bool = True,
+    judge_model: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Calculate rewards for a batch of episodes
@@ -166,7 +171,9 @@ async def calculate_batch_rewards(
     rewards = []
     
     for pred, truth, info in zip(predictions, ground_truths, episode_infos):
-        reward = await calculate_reward(pred, truth, info, use_judge)
+        reward = await calculate_reward(
+            pred, truth, info, use_judge=use_judge, judge_model=judge_model
+        )
         rewards.append(reward)
     
     return rewards
