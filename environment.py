@@ -10,6 +10,10 @@ from database import (
     get_tickers_with_names, get_all_metrics,
     get_financial_value, get_available_periods, get_latest_period
 )
+from textmatch import (
+    build_ticker_alias_map, build_metric_alias_map,
+    match_alias, clean_company_string
+)
 
 class ToolName(Enum):
     """Available tools in the financial environment"""
@@ -131,132 +135,35 @@ class FinancialEnvironment:
     async def _ensure_alias_maps(self):
         """Load alias maps for tickers and metrics on first use."""
         if self._ticker_alias_map is None:
-            # Build ticker alias map
-            self._ticker_alias_map = {}
+            # Build ticker alias map from DB rows (algorithmic cleaning only)
             try:
                 rows = await get_tickers_with_names()
             except Exception:
                 rows = []
-            for row in rows or []:
-                tkr = row.get("ticker", "").strip()
-                name = row.get("company_name", "").strip()
-                if not tkr:
-                    continue
-                # direct ticker
-                self._ticker_alias_map[tkr.lower()] = tkr
-                # exact company name
-                if name:
-                    self._ticker_alias_map[name.lower()] = tkr
-                    # also store basic cleaned variants
-                    simplified = name.lower().replace(",", "").replace(".", "").replace(" inc", "").replace(" corporation", "").replace(" corp", "").replace(" limited", "").replace(" n.v", "").strip()
-                    self._ticker_alias_map[simplified] = tkr
-            # manual aliases
-            manual = {
-                "google": "GOOGL",
-                "alphabet": "GOOGL",
-                "facebook": "META",
-                "meta": "META",
-                "tesla": "TSLA",
-                "nvidia": "NVDA",
-                "broadcom": "AVGO",
-                "taiwan semiconductor": "TSM",
-            }
-            for k, v in manual.items():
-                self._ticker_alias_map.setdefault(k, v)
+            self._ticker_alias_map = build_ticker_alias_map(rows)
 
         if self._metric_alias_map is None:
-            # Build metric alias map
-            self._metric_alias_map = {}
+            # Build metric alias map directly from DB codes/descriptions (no hand synonyms)
             try:
                 metrics = await get_all_metrics()
             except Exception:
                 metrics = []
-            for m in metrics or []:
-                code = m.get("metric_name", "").strip()
-                desc = m.get("description", "").strip()
-                if not code:
-                    continue
-                self._metric_alias_map[code.lower()] = code
-                if desc:
-                    self._metric_alias_map[desc.lower()] = code
-            # manual synonyms
-            manual_metric_aliases = {
-                # income
-                "revenue": "revenue",
-                "net income": "netinc",
-                "eps": "eps",
-                "earnings per share": "eps",
-                "diluted eps": "epsDil",
-                "eps diluted": "epsDil",
-                "ebitda": "ebitda",
-                "ebit": "ebit",
-                "r&d": "rnd",
-                "research and development": "rnd",
-                "sg&a": "sga",
-                "selling general administrative": "sga",
-                "operating income": "opinc",
-                "cost of revenue": "costRev",
-                "gross profit": "grossProfit",
-                "operating expenses": "opex",
-                # balance
-                "assets": "assets",
-                "ppe": "ppeq",
-                "pp&e": "ppeq",
-                "accounts receivable": "acctRec",
-                "cash and equivalents": "cashAndEq",
-                "current assets": "assetsCurrent",
-                "inventory": "inventory",
-                "accounts payable": "acctPay",
-                "total liabilities": "totalLiabilities",
-                "equity": "equity",
-                "deferred revenue": "deferredRev",
-                "debt": "debt",
-                # cash flow
-                "free cash flow": "freeCashFlow",
-                "dividends paid": "payDiv",
-                "depreciation and amortization": "depamor",
-                "capex": "capex",
-                "net cash from ops": "ncfo",
-                "net cash from investing": "ncfi",
-                "net cash from financing": "ncff",
-                "stock based compensation": "sbcomp",
-                # overview/ratios
-                "revenue qoq": "revenueQoQ",
-                "revenue growth qoq": "revenueQoQ",
-                "gross margin": "grossMargin",
-                "profit margin": "profitMargin",
-                "debt to equity": "debtEquity",
-                "long term debt to equity": "longTermDebtEquity",
-                "roe": "roe",
-                "return on equity": "roe",
-                "roa": "roa",
-                "return on assets": "roa",
-                "book value per share": "bvps",
-                "book value": "bookVal",
-                "revenue per share": "rps",
-                # market/daily
-                "market cap": "marketCap",
-                "price to earnings": "peRatio",
-                "p/e": "peRatio",
-                "pe": "peRatio",
-                "price to book": "pbRatio",
-                "pb": "pbRatio",
-                "peg": "trailingPEG1Y",
-            }
-            for k, v in manual_metric_aliases.items():
-                self._metric_alias_map.setdefault(k, v)
+            self._metric_alias_map = build_metric_alias_map(metrics)
 
     async def _normalize_ticker(self, raw: str) -> Optional[str]:
         await self._ensure_alias_maps()
         if not raw:
             return None
         s = raw.strip().lower()
-        if s in self._ticker_alias_map:
-            return self._ticker_alias_map[s]
-        # substring match on company names in alias map keys (which includes names)
+        # First, try exact/normalized/fuzzy via textmatch
+        match = match_alias(s, self._ticker_alias_map, cutoff=0.92)
+        if match:
+            return match
+        # Conservative substring fallback on cleaned names
+        s_clean = clean_company_string(s)
         best = None
         for alias, tkr in self._ticker_alias_map.items():
-            if alias != tkr.lower() and s in alias:
+            if alias != tkr.lower() and s_clean and s_clean in alias:
                 best = tkr
                 break
         return best
@@ -266,14 +173,8 @@ class FinancialEnvironment:
         if not raw:
             return None
         s = raw.strip().lower()
-        if s in self._metric_alias_map:
-            return self._metric_alias_map[s]
-        # try removing spaces and punctuation
-        compact = s.replace(" ", "").replace("-", "")
-        for alias in list(self._metric_alias_map.keys()):
-            if alias.replace(" ", "").replace("-", "") == compact:
-                return self._metric_alias_map[alias]
-        return None
+        # exact/normalized/fuzzy via textmatch against DB-driven aliases
+        return match_alias(s, self._metric_alias_map, cutoff=0.92)
 
     async def _normalize_period(self, raw: str, ticker: str, metric: str) -> Optional[str]:
         if not raw:
@@ -468,10 +369,10 @@ def parse_tool_calls_from_response(response: str) -> List[Dict[str, Any]]:
             # Parse arguments
             parsed_args = {}
             
-            if args_str:
+            if args_str or tool_name == "return_answer":
                 # Special handling for return_answer
                 if tool_name == "return_answer":
-                    answer = args_str
+                    answer = args_str or ""
                     if answer.startswith('answer='):
                         answer = answer[7:].strip()
                     # Remove surrounding quotes
@@ -479,6 +380,9 @@ def parse_tool_calls_from_response(response: str) -> List[Dict[str, Any]]:
                         if answer.startswith(quote) and answer.endswith(quote):
                             answer = answer[len(quote):-len(quote)]
                             break
+                    # Treat empty or missing answer as NO_COMPLETION_NEEDED
+                    if not answer or answer.strip() == "":
+                        answer = "NO_COMPLETION_NEEDED"
                     parsed_args = {"answer": answer}
                 else:
                     # Parse other functions

@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
+from contextlib import asynccontextmanager
 import asyncio
 import os
 
@@ -20,7 +21,24 @@ from synthetic import generate_cases
 from agent import AutocompleteAgent
 from rewards import calculate_reward
 
-app = FastAPI(title="Finance Autocomplete Test Server")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context to replace deprecated startup/shutdown events."""
+    import sys
+    print("Initializing database...")
+    try:
+        force_reload = getattr(app.state, 'force_reload', False)
+        await setup_database(force_reload=force_reload)  # Requires TIINGO_API_KEY
+    except ValueError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        print("\nPlease set TIINGO_API_KEY in your environment or .env file", file=sys.stderr)
+        sys.exit(1)
+    print("Database ready")
+    # Startup complete
+    yield
+    # Shutdown logic could go here if needed
+
+app = FastAPI(title="Finance Autocomplete Test Server", lifespan=lifespan)
 
 # Enable CORS for local testing
 app.add_middleware(
@@ -43,21 +61,7 @@ class EvaluationResponse(BaseModel):
     # Allow metadata objects in test cases
     test_cases: List[Dict[str, Any]]
 
-# Startup event to initialize database
-@app.on_event("startup")
-async def startup_event():
-    """Initialize database on startup"""
-    import sys
-    print("Initializing database...")
-    try:
-        # Check if force_reload flag was set via command line
-        force_reload = getattr(app.state, 'force_reload', False)
-        await setup_database(force_reload=force_reload)  # Requires TIINGO_API_KEY
-    except ValueError as e:
-        print(f"ERROR: {e}", file=sys.stderr)
-        print("\nPlease set TIINGO_API_KEY in your environment or .env file", file=sys.stderr)
-        sys.exit(1)
-    print("Database ready")
+# Startup handled via lifespan
 
 # Endpoints
 @app.get("/")

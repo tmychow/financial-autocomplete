@@ -601,9 +601,8 @@ async def setup_database(tiingo_api_key: str = None, force_reload: bool = False)
         
         # Daily metrics
         ("marketCap", "Market Capitalization", "USD_billions"),
-        ("peRatio", "P/E Ratio", "ratio"),
+        ("peRatio", "Price to Earnings Ratio", "ratio"),
         ("pbRatio", "Price to Book Ratio", "ratio"),
-        ("trailingPEG1Y", "PEG Ratio", "ratio"),
     ]
     
     for metric_name, description, unit in metrics:

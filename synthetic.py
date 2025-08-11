@@ -488,7 +488,7 @@ async def generate_no_completion_case(tickers: List[str], metrics: List[Dict[str
 
 # ============== Main Generation Function ==============
 
-async def generate_cases(num_cases: int, no_completion_ratio: float = 0.25) -> List[Dict[str, str]]:
+async def generate_cases(num_cases: int, no_completion_ratio: float = 0.20) -> List[Dict[str, str]]:
     """
     Generate synthetic test cases
     
@@ -505,16 +505,23 @@ async def generate_cases(num_cases: int, no_completion_ratio: float = 0.25) -> L
     
     cases = []
     
-    # Generators with their weights
+    # Generators with their weights (applied within completion cases; no-completion is handled separately)
+    # Target distribution within completions:
+    # - simple: 40%
+    # - latest: 15%
+    # - difference: 15%
+    # - cross_ticker_difference: 15%
+    # - multi_metric_calc: 7.5%
+    # - cagr: 7.5%
     generators = [
-        generate_simple_case,           # 35%
-        generate_latest_case,           # 10%
-        generate_difference_case,        # 15%
-        generate_cross_ticker_difference_case,  # 10%
-        generate_multi_metric_calc_case,       # 15%
-        generate_cagr_case,             # 15%
+        generate_simple_case,                  # 40%
+        generate_latest_case,                  # 15%
+        generate_difference_case,              # 15%
+        generate_cross_ticker_difference_case, # 15%
+        generate_multi_metric_calc_case,       # 7.5%
+        generate_cagr_case,                    # 7.5%
     ]
-    weights = [0.35, 0.1, 0.15, 0.1, 0.15, 0.15]
+    weights = [0.40, 0.15, 0.15, 0.15, 0.075, 0.075]
     
     attempts = 0
     max_attempts = num_cases * 10  # Prevent infinite loop

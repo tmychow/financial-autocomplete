@@ -424,7 +424,11 @@
                 <div class="eval-form">
                     <div class="form-group">
                         <label>Models (comma-separated)</label>
-                        <input type="text" id="models-input" value="gpt-4.1-mini" style="width: 300px;">
+                        <input type="text" id="models-input" value="gpt-4.1-mini" style="width: 300px;" list="model-options" placeholder="e.g., gpt-4.1-mini, ollama:qwen2.5:3b-instruct">
+                        <datalist id="model-options">
+                            <option value="gpt-4.1-mini"></option>
+                            <option value="ollama:qwen2.5:3b-instruct"></option>
+                        </datalist>
                     </div>
                     <div class="form-group">
                         <label>Number of Test Cases</label>
