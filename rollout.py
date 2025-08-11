@@ -6,6 +6,9 @@ Handles episode generation and trajectory building for ART training
 import asyncio
 import time
 import uuid
+import os
+import json
+from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
 from tqdm.asyncio import tqdm_asyncio
 
@@ -31,6 +34,59 @@ except ImportError:
 from agent import AutocompleteAgent
 from rewards import calculate_reward
 from synthetic import generate_cases
+
+
+# ============== Logging Helpers ==============
+
+def _append_jsonl(path: str, obj: dict) -> None:
+    """Append a JSON object as one line to a .jsonl file, creating directories as needed."""
+    try:
+        directory = os.path.dirname(path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+    except Exception as e:
+        # Best-effort logging; do not crash rollouts due to logging errors
+        print(f"Warning: failed to write log to {path}: {e}")
+
+
+def _make_rollout_log_record(
+    *,
+    timestamp: str,
+    step: int,
+    rollout_id: int,
+    test_case: Dict[str, Any],
+    completion: Any,
+    conversation: list,
+    tool_calls: list,
+    episode_info: dict,
+    reward_info: dict,
+    latency: float,
+    model: Any,
+    judge_model: Optional[str],
+    is_validation: bool = False,
+    benchmark_reward: Optional[float] = None,
+) -> Dict[str, Any]:
+    """Create a stable, human-readable log record for a rollout."""
+    model_name = getattr(model, "name", None) or getattr(model, "inference_model_name", None) or "unknown"
+    return {
+        "timestamp": timestamp,
+        "step": step,
+        "rollout_id": rollout_id,
+        "is_validation": is_validation,
+        "input": test_case.get("input"),
+        "ground_truth": test_case.get("ground_truth"),
+        "prediction": completion,
+        "conversation": conversation,
+        "tool_calls": tool_calls,
+        "episode_info": episode_info,
+        "reward_info": reward_info,
+        "latency_sec": latency,
+        "model": model_name,
+        "judge_model": judge_model or os.getenv("JUDGE_MODEL", "gpt-4.1"),
+        "benchmark_reward": benchmark_reward,
+    }
 
 async def run_single_rollout(
     model: Any,
@@ -79,6 +135,7 @@ async def run_single_rollout(
         
         # Build ART trajectory
         messages_and_choices = agent.get_messages_and_choices()
+        conversation = agent.get_conversation()
         
         # Create metrics dictionary
         metrics = {
@@ -102,13 +159,28 @@ async def run_single_rollout(
             metrics=metrics
         )
 
-        
+        log_record = _make_rollout_log_record(
+            timestamp=datetime.utcnow().isoformat(),
+            step=step,
+            rollout_id=rollout_id,
+            test_case=test_case,
+            completion=completion,
+            conversation=conversation,
+            tool_calls=tool_calls,
+            episode_info=episode_info,
+            reward_info=reward_info,
+            latency=latency,
+            model=model,
+            judge_model=judge_model,
+        )
+
         return {
             "trajectory": trajectory,
             "completion": completion,
             "ground_truth": test_case["ground_truth"],
             "reward_info": reward_info,
             "episode_info": episode_info,
+            "log_record": log_record,
             "success": True
         }
         
@@ -129,6 +201,7 @@ async def conduct_rollouts(
     step: int,
     use_judge: bool = True,
     judge_model: Optional[str] = None,
+    log_path: Optional[str] = None,
 ) -> List[art.TrajectoryGroup]:
     """
     Conduct multiple rollouts for a set of test cases
@@ -169,9 +242,12 @@ async def conduct_rollouts(
         results = await asyncio.gather(*tasks)
         
         # Collect successful trajectories
+        effective_log_path = log_path or os.getenv("TRAIN_LOG_PATH")
         for result in results:
             if result["success"] and result["trajectory"]:
                 case_rollouts.append(result["trajectory"])
+                if effective_log_path and "log_record" in result:
+                    _append_jsonl(effective_log_path, result["log_record"])
         
         if case_rollouts:
             all_rollouts.extend(case_rollouts)
@@ -189,6 +265,7 @@ async def run_validation(
     step: int = 0,
     use_judge: bool = True,
     judge_model: Optional[str] = None,
+    log_path: Optional[str] = None,
 ) -> List[art.Trajectory]:
     """
     Run validation against a benchmark model
@@ -240,6 +317,14 @@ async def run_validation(
             val_trajectory.metrics["my_reward"] = my_reward
             val_trajectory.metrics["benchmark_reward"] = benchmark_reward
             
+            # Log validation record
+            effective_log_path = log_path or os.getenv("VAL_LOG_PATH")
+            if effective_log_path and "log_record" in my_result:
+                rec = dict(my_result["log_record"])  # shallow copy
+                rec["is_validation"] = True
+                rec["benchmark_reward"] = benchmark_reward
+                _append_jsonl(effective_log_path, rec)
+
             validation_trajectories.append(val_trajectory)
     
     return validation_trajectories

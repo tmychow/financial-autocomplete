@@ -402,6 +402,7 @@
         <div class="tabs">
             <button class="tab active" onclick="switchTab('data')">Database Viewer</button>
             <button class="tab" onclick="switchTab('eval')">Model Evaluator</button>
+            <button class="tab" onclick="switchTab('logs')">Trajectory Logs</button>
         </div>
         
         <!-- Data Viewer Tab -->
@@ -448,6 +449,29 @@
                 <!-- Results will be displayed here -->
             </div>
         </div>
+
+        <!-- Logs Tab -->
+        <div id="logs-tab" class="tab-content">
+            <div class="eval-controls">
+                <div class="eval-form">
+                    <div class="form-group">
+                        <label>Load JSONL Log File</label>
+                        <input type="file" id="log-file-input" accept=".jsonl">
+                    </div>
+                    <div class="form-group">
+                        <label>Filters</label>
+                        <div>
+                            <label><input type="checkbox" id="filter-correct"> Only Correct</label>
+                            <label style="margin-left: 10px;"><input type="checkbox" id="filter-incorrect"> Only Incorrect</label>
+                            <label style="margin-left: 10px;"><input type="checkbox" id="filter-validation"> Only Validation</label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="logs-summary" class="summary" style="display:none;"></div>
+            <div id="logs-container" class="detailed-results"></div>
+        </div>
     </div>
     
     <script>
@@ -455,6 +479,7 @@
         let currentTab = 'data';
         let financialData = [];
         let evaluationResults = null;
+        let trajectoryRecords = [];
         
         // Tab switching
         function switchTab(tab) {
@@ -472,6 +497,140 @@
             if (tab === 'data' && financialData.length === 0) {
                 loadFinancialData();
             }
+        }
+        // Logs tab: load and render JSONL
+        document.getElementById('log-file-input').addEventListener('change', async (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (!file) return;
+            const text = await file.text();
+            trajectoryRecords = text.split('\n').filter(Boolean).map(line => {
+                try { return JSON.parse(line); } catch (_) { return null; }
+            }).filter(Boolean);
+            renderLogs();
+        });
+
+        document.getElementById('filter-correct').addEventListener('change', renderLogs);
+        document.getElementById('filter-incorrect').addEventListener('change', renderLogs);
+        document.getElementById('filter-validation').addEventListener('change', renderLogs);
+
+        function renderLogs() {
+            const container = document.getElementById('logs-container');
+            const summary = document.getElementById('logs-summary');
+            if (!trajectoryRecords.length) {
+                container.innerHTML = '<div class="loading">Load a JSONL log file to view trajectories.</div>';
+                summary.style.display = 'none';
+                return;
+            }
+
+            const onlyCorrect = document.getElementById('filter-correct').checked;
+            const onlyIncorrect = document.getElementById('filter-incorrect').checked;
+            const onlyValidation = document.getElementById('filter-validation').checked;
+
+            let recs = trajectoryRecords.slice();
+            if (onlyValidation) recs = recs.filter(r => r.is_validation);
+            if (onlyCorrect && !onlyIncorrect) recs = recs.filter(r => r?.reward_info?.is_correct === true);
+            if (onlyIncorrect && !onlyCorrect) recs = recs.filter(r => r?.reward_info?.is_correct === false);
+
+            summary.style.display = 'block';
+            summary.innerHTML = `<h3>Log Summary</h3>
+                <div class="accuracy-scores">
+                    <div class="score-item"><div class="score-value">${recs.length}</div><div class="score-label">Shown</div></div>
+                    <div class="score-item"><div class="score-value">${trajectoryRecords.length}</div><div class="score-label">Total</div></div>
+                </div>`;
+
+            container.innerHTML = '';
+            recs.forEach((r, i) => {
+                const correct = r?.reward_info?.is_correct === true;
+                const reward = r?.reward_info?.total_reward;
+                const judge = r?.reward_info?.correctness_score;
+                const card = document.createElement('div');
+                card.className = 'result-card';
+                const tag = r.is_validation ? '[VAL]' : '[TRAIN]';
+                card.innerHTML = `
+                    <div class="result-header">${tag} Step ${r.step} • Rollout #${r.rollout_id} ${correct ? '✓' : '✗'}</div>
+                    <div class="stats-row">
+                        <span>Reward: ${reward?.toFixed?.(3) ?? 'n/a'}</span>
+                        <span>Judge: ${judge?.toFixed?.(3) ?? 'n/a'}</span>
+                        <span>Latency: ${(r.latency_sec ?? 0).toFixed(2)}s</span>
+                        <span>Model: ${escapeHtml(r.model || '')}</span>
+                    </div>
+                    <div class="result-input"><strong>Input:</strong> ${escapeHtml(r.input ?? '')}</div>
+                    <div class="result-input"><strong>Expected:</strong> ${escapeHtml(r.ground_truth ?? '')}</div>
+                    <div class="result-input"><strong>Prediction:</strong> ${escapeHtml(r.prediction ?? '')}</div>
+                `;
+
+                if (r?.reward_info?.reasoning) {
+                    const jr = document.createElement('div');
+                    jr.className = 'judge-reasoning';
+                    jr.innerHTML = `<strong>Judge Reasoning:</strong><br>${escapeHtml(r.reward_info.reasoning).replace(/\n/g, '<br>')}`;
+                    card.appendChild(jr);
+                }
+
+                // Tool calls table
+                const calls = Array.isArray(r.tool_calls) ? r.tool_calls : [];
+                const collId = `tools-${r.step}-${r.rollout_id}-${i}`;
+                const collBtn = document.createElement('div');
+                collBtn.className = 'collapsible';
+                collBtn.innerHTML = `<span>🔧 View Tool Calls (${calls.length})</span><span class="collapsible-arrow">▶</span>`;
+                const collBody = document.createElement('div');
+                collBody.id = collId;
+                collBody.className = 'collapsible-content';
+
+                collBtn.addEventListener('click', () => {
+                    const show = !collBody.classList.contains('show');
+                    collBody.classList.toggle('show', show);
+                    collBtn.classList.toggle('active', show);
+                });
+
+                if (calls.length) {
+                    const table = document.createElement('table');
+                    table.className = 'data-table';
+                    table.innerHTML = `
+                        <thead><tr>
+                            <th>Tool</th><th>Arguments</th><th>Result</th>
+                        </tr></thead><tbody></tbody>`;
+                    const tbody = table.querySelector('tbody');
+                    calls.forEach(tc => {
+                        const tr = document.createElement('tr');
+                        const args = JSON.stringify(tc.arguments ?? tc.args ?? {}, null, 0);
+                        const result = typeof tc.result === 'object' ? JSON.stringify(tc.result) : String(tc.result ?? '');
+                        tr.innerHTML = `<td>${escapeHtml(tc.tool)}</td><td>${escapeHtml(args)}</td><td>${escapeHtml(result)}</td>`;
+                        tbody.appendChild(tr);
+                    });
+                    collBody.appendChild(table);
+                } else {
+                    collBody.innerHTML = '<div class="loading">No tool calls recorded</div>';
+                }
+
+                card.appendChild(collBtn);
+                card.appendChild(collBody);
+
+                // Conversation
+                if (Array.isArray(r.conversation)) {
+                    const convBtn = document.createElement('div');
+                    convBtn.className = 'collapsible';
+                    convBtn.innerHTML = `<span>🗨️ View Conversation</span><span class="collapsible-arrow">▶</span>`;
+                    const convBody = document.createElement('div');
+                    convBody.className = 'collapsible-content';
+                    const pre = document.createElement('pre');
+                    pre.style.whiteSpace = 'pre-wrap';
+                    pre.textContent = r.conversation.map(m => `${(m.role||'').toUpperCase()}: ${m.content || ''}`).join('\n\n');
+                    convBody.appendChild(pre);
+                    convBtn.addEventListener('click', () => {
+                        const show = !convBody.classList.contains('show');
+                        convBody.classList.toggle('show', show);
+                        convBtn.classList.toggle('active', show);
+                    });
+                    card.appendChild(convBtn);
+                    card.appendChild(convBody);
+                }
+
+                container.appendChild(card);
+            });
+        }
+
+        function escapeHtml(s) {
+            return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
         }
         
         // Load financial data
