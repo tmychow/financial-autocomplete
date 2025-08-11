@@ -5,6 +5,7 @@ Generates test cases from the financial database
 
 import asyncio
 import random
+import os
 from typing import List, Dict, Optional
 from database import (
     get_all_metrics, get_available_periods, get_financial_value,
@@ -119,13 +120,18 @@ async def generate_latest_case(tickers: List[str], metrics: List[Dict[str, str]]
         
         company = await get_company_name(ticker)
         
-        # Templates that explicitly use "latest"
+        # Templates that explicitly use "latest" (expanded for diversity)
         templates = [
             "{company}'s latest {desc} is ",
             "The latest {desc} for {company} is ",
             "{company} latest reported {desc} of ",
             "Latest {desc} for {company}: ",
             "{company}'s most recent {desc} is ",
+            "As of the latest period, {company}'s {desc} is ",
+            "Most recent {desc} reported by {company} is ",
+            "Latest available {desc} for {company} stands at ",
+            "For the latest period, {company}'s {desc} was ",
+            "In the most recent filing, {company}'s {desc} was ",
         ]
         
         prefix = random.choice(templates).format(
@@ -154,6 +160,10 @@ async def generate_simple_case(tickers: List[str], metrics: List[Dict[str, str]]
             "The {desc} for {company} in {period} was ",
             "In {period}, {company}'s {desc} was ",
             "For {period}, {company} had {desc} of ",
+            "During {period}, {company} reported {desc} was ",
+            "Across {period}, {company}'s {desc} came in at ",
+            "For the period {period}, {company}'s {desc} was ",
+            "{period} saw {company}'s {desc} at ",
         ]
         
         # Templates without period (should use latest period)
@@ -162,6 +172,9 @@ async def generate_simple_case(tickers: List[str], metrics: List[Dict[str, str]]
             "{company}'s {desc} is ",
             "The {desc} for {company} is ",
             "{company} has {desc} of ",
+            "Currently, {company}'s {desc} is ",
+            "For {company}, {desc} is ",
+            "{company} shows {desc} of ",
         ]
         
         # Randomly choose which type of template to use
@@ -222,6 +235,9 @@ async def generate_difference_case(tickers: List[str], metrics: List[Dict[str, s
             "The change in {desc} for {company} from {p1} to {p2} is ",
             "{company}'s {desc} changed from {p1} to {p2} by ",
             "From {p1} to {p2}, {company}'s {desc} changed by ",
+            "Between {p1} and {p2}, {company}'s {desc} moved by ",
+            "Change in {company}'s {desc} from {p1} to {p2}: ",
+            "{company} saw its {desc} shift from {p1} to {p2} by ",
         ]
         
         prefix = random.choice(templates).format(
@@ -457,6 +473,9 @@ STATIC_NO_COMPLETION_PREFIXES = [
     "In recent news articles it was reported that ",
     "The company's guidance suggests that ",
     "Market sentiment indicates that ",
+    "On the earnings call, it was noted that ",
+    "Investor presentations have stated that ",
+    "Industry chatter points to the idea that ",
 ]
 
 DYNAMIC_NO_COMPLETION_TEMPLATES = [
@@ -466,11 +485,15 @@ DYNAMIC_NO_COMPLETION_TEMPLATES = [
     "{company}'s team mentioned its {desc} trend during the ",
     "There has been speculation about how {company}'s {desc} might ",
     "The market reaction to {company}'s {desc} was ",
+    "Commentary around {company}'s {desc} has focused on ",
+    "Some observers note that {company}'s {desc} could ",
+    "Debate continues on whether {company}'s {desc} will ",
+    "Looking back at {period}, discussion of {company}'s {desc} centered on ",
 ]
 
 async def generate_no_completion_case(tickers: List[str], metrics: List[Dict[str, str]]) -> Dict[str, str]:
     """Generate case where no completion is needed"""
-    if random.random() < 0.5:
+    if random.random() < 0.1:
         prefix = random.choice(STATIC_NO_COMPLETION_PREFIXES)
     else:
         ticker = random.choice(tickers) if tickers else "AAPL"
@@ -490,7 +513,7 @@ async def generate_no_completion_case(tickers: List[str], metrics: List[Dict[str
 
 async def generate_cases(
     num_cases: int,
-    no_completion_ratio: float = 0.20,
+    no_completion_ratio: float = 0.10,
     curriculum_stage: Optional[int] = None,
 ) -> List[Dict[str, str]]:
     """
@@ -527,9 +550,9 @@ async def generate_cases(
     # Stage 2: introduce differences
     # Stage 3+: full mix incl. cross-ticker, multi-metric, CAGR
     stage_to_weights = {
-        1: ([0.70, 0.30, 0.00, 0.00, 0.00, 0.00], 0.40),
-        2: ([0.50, 0.20, 0.15, 0.15, 0.00, 0.00], 0.30),
-        3: ([0.40, 0.15, 0.15, 0.15, 0.075, 0.075], 0.20),
+        1: ([0.70, 0.30, 0.00, 0.00, 0.00, 0.00], 0.10),
+        2: ([0.50, 0.20, 0.15, 0.15, 0.00, 0.00], 0.10),
+        3: ([0.40, 0.15, 0.15, 0.15, 0.075, 0.075], 0.10),
     }
 
     # Select weights and no-completion ratio based on curriculum stage (if provided)

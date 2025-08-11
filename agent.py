@@ -43,7 +43,7 @@ class AutocompleteAgent:
     Manages multi-turn conversations and tool interactions
     """
     
-    def __init__(self, model: Any = None, temperature: float = 0.1, max_tokens: int = 500):
+    def __init__(self, model: Any = None, temperature: float = 0.8, max_tokens: int = 500):
         """
         Initialize the autocomplete agent
         

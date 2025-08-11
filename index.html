@@ -466,6 +466,13 @@
                             <label style="margin-left: 10px;"><input type="checkbox" id="filter-validation"> Only Validation</label>
                         </div>
                     </div>
+                    <div class="form-group">
+                        <label>Step Range</label>
+                        <div>
+                            <input type="number" id="filter-step-min" placeholder="Min step" style="width: 120px;">
+                            <input type="number" id="filter-step-max" placeholder="Max step" style="width: 120px; margin-left: 10px;">
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -512,6 +519,8 @@
         document.getElementById('filter-correct').addEventListener('change', renderLogs);
         document.getElementById('filter-incorrect').addEventListener('change', renderLogs);
         document.getElementById('filter-validation').addEventListener('change', renderLogs);
+        document.getElementById('filter-step-min').addEventListener('input', renderLogs);
+        document.getElementById('filter-step-max').addEventListener('input', renderLogs);
 
         function renderLogs() {
             const container = document.getElementById('logs-container');
@@ -525,11 +534,17 @@
             const onlyCorrect = document.getElementById('filter-correct').checked;
             const onlyIncorrect = document.getElementById('filter-incorrect').checked;
             const onlyValidation = document.getElementById('filter-validation').checked;
+            let minStep = parseInt(document.getElementById('filter-step-min').value);
+            let maxStep = parseInt(document.getElementById('filter-step-max').value);
+            if (!Number.isFinite(minStep)) minStep = null;
+            if (!Number.isFinite(maxStep)) maxStep = null;
 
             let recs = trajectoryRecords.slice();
             if (onlyValidation) recs = recs.filter(r => r.is_validation);
             if (onlyCorrect && !onlyIncorrect) recs = recs.filter(r => r?.reward_info?.is_correct === true);
             if (onlyIncorrect && !onlyCorrect) recs = recs.filter(r => r?.reward_info?.is_correct === false);
+            if (minStep !== null) recs = recs.filter(r => typeof r.step === 'number' ? r.step >= minStep : true);
+            if (maxStep !== null) recs = recs.filter(r => typeof r.step === 'number' ? r.step <= maxStep : true);
 
             summary.style.display = 'block';
             summary.innerHTML = `<h3>Log Summary</h3>
