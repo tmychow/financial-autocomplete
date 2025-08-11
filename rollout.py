@@ -267,8 +267,26 @@ async def generate_training_trajectories(
     Returns:
         Tuple of (trajectory_groups, metrics_dict)
     """
-    # Generate test cases
-    test_cases = await generate_cases(num_cases)
+    # Determine curriculum stage from step
+    # Stages: 1 for early, 2 for mid, 3 for late/default
+    if step < 40:
+        curriculum_stage = 1
+    elif step < 80:
+        curriculum_stage = 2
+    else:
+        curriculum_stage = 3
+
+    # Allow override via environment variable CURRICULUM_STAGE
+    import os
+    env_stage = os.getenv("CURRICULUM_STAGE")
+    if env_stage is not None:
+        try:
+            curriculum_stage = int(env_stage)
+        except ValueError:
+            pass
+
+    # Generate test cases with curriculum
+    test_cases = await generate_cases(num_cases, curriculum_stage=curriculum_stage)
     
     # Conduct rollouts
     trajectory_groups = await conduct_rollouts(

@@ -488,7 +488,11 @@ async def generate_no_completion_case(tickers: List[str], metrics: List[Dict[str
 
 # ============== Main Generation Function ==============
 
-async def generate_cases(num_cases: int, no_completion_ratio: float = 0.20) -> List[Dict[str, str]]:
+async def generate_cases(
+    num_cases: int,
+    no_completion_ratio: float = 0.20,
+    curriculum_stage: Optional[int] = None,
+) -> List[Dict[str, str]]:
     """
     Generate synthetic test cases
     
@@ -504,24 +508,38 @@ async def generate_cases(num_cases: int, no_completion_ratio: float = 0.20) -> L
         return []
     
     cases = []
-    
-    # Generators with their weights (applied within completion cases; no-completion is handled separately)
-    # Target distribution within completions:
-    # - simple: 40%
-    # - latest: 15%
-    # - difference: 15%
-    # - cross_ticker_difference: 15%
-    # - multi_metric_calc: 7.5%
-    # - cagr: 7.5%
+
+    # Generators in fixed order
     generators = [
-        generate_simple_case,                  # 40%
-        generate_latest_case,                  # 15%
-        generate_difference_case,              # 15%
-        generate_cross_ticker_difference_case, # 15%
-        generate_multi_metric_calc_case,       # 7.5%
-        generate_cagr_case,                    # 7.5%
+        generate_simple_case,
+        generate_latest_case,
+        generate_difference_case,
+        generate_cross_ticker_difference_case,
+        generate_multi_metric_calc_case,
+        generate_cagr_case,
     ]
-    weights = [0.40, 0.15, 0.15, 0.15, 0.075, 0.075]
+
+    # Default distribution within completion cases
+    default_weights = [0.40, 0.15, 0.15, 0.15, 0.075, 0.075]
+
+    # Curriculum schedule (stage-specific weights and no-completion ratios)
+    # Stage 1: emphasize no-completion + simple/latest
+    # Stage 2: introduce differences
+    # Stage 3+: full mix incl. cross-ticker, multi-metric, CAGR
+    stage_to_weights = {
+        1: ([0.70, 0.30, 0.00, 0.00, 0.00, 0.00], 0.40),
+        2: ([0.50, 0.20, 0.15, 0.15, 0.00, 0.00], 0.30),
+        3: ([0.40, 0.15, 0.15, 0.15, 0.075, 0.075], 0.20),
+    }
+
+    # Select weights and no-completion ratio based on curriculum stage (if provided)
+    if curriculum_stage is not None:
+        weights, stage_no_completion_ratio = stage_to_weights.get(
+            int(curriculum_stage), (default_weights, no_completion_ratio)
+        )
+        no_completion_ratio = stage_no_completion_ratio
+    else:
+        weights = default_weights
     
     attempts = 0
     max_attempts = num_cases * 10  # Prevent infinite loop
@@ -536,6 +554,9 @@ async def generate_cases(num_cases: int, no_completion_ratio: float = 0.20) -> L
             continue
         
         # Choose a generator based on weights
+        # If all weights are zero (shouldn't happen), fall back to defaults
+        if sum(weights) <= 0:
+            weights = default_weights
         gen = random.choices(generators, weights)[0]
         case = await gen(tickers, metrics)
         if case:

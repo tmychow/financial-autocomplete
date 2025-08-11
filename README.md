@@ -81,4 +81,3 @@ The system fetches comprehensive financial data using exact Tiingo field names:
 
 - [ ] Resume from checkpoint
 - [ ] Log trajectories to wandb
-- [ ] Ollama local model support for evals
