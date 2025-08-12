@@ -257,49 +257,6 @@ async def generate_difference_case(tickers: List[str], metrics: List[Dict[str, s
         return {"input": prefix, "ground_truth": completion, "metadata": metadata}
     return None
 
-async def generate_cagr_case(tickers: List[str], metrics: List[Dict[str, str]]):
-    """Generate CAGR calculation case"""
-    for _ in range(10):
-        ticker = random.choice(tickers)
-        metric = random.choice(metrics)
-        # Only use FY periods for CAGR
-        periods = [p for p in await get_available_periods(ticker, metric["metric_name"]) if p.endswith("FY")]
-        if len(periods) < 2:
-            continue
-        start, end = sorted(random.sample(periods, 2))
-        v_start = await get_financial_value(ticker, metric["metric_name"], start)
-        v_end = await get_financial_value(ticker, metric["metric_name"], end)
-        if not v_start or not v_end:
-            continue
-        years = int(end[:4]) - int(start[:4])
-        if years <= 0 or v_start["value"] == 0 or v_end["value"] == 0:
-            continue
-        
-        # Handle negative values for CAGR
-        if (v_start["value"] < 0 and v_end["value"] > 0) or (v_start["value"] > 0 and v_end["value"] < 0):
-            continue  # Skip sign changes
-        
-        if v_start["value"] < 0 and v_end["value"] < 0:
-            # Both negative - use absolute values
-            cagr = ((abs(v_end["value"]) / abs(v_start["value"])) ** (1 / years) - 1) * 100
-        else:
-            # Both positive
-            cagr = ((v_end["value"] / v_start["value"]) ** (1 / years) - 1) * 100
-        
-        company = await get_company_name(ticker)
-        prefix = f"The CAGR of {metric['description'].lower()} for {company} from {start} to {end} is "
-        completion = f"{cagr:.1f}%"
-        metadata = {
-            "type": "cagr",
-            "required_lookups": [
-                {"ticker": ticker, "metric": metric["metric_name"], "period": start},
-                {"ticker": ticker, "metric": metric["metric_name"], "period": end},
-            ],
-            "calc": {"operation": "CAGR", "duration": years}
-        }
-        return {"input": prefix, "ground_truth": completion, "metadata": metadata}
-    return None
-
 async def generate_cross_ticker_difference_case(tickers: List[str], metrics: List[Dict[str, str]]):
     """Generate case comparing two companies"""
     for _ in range(10):
@@ -539,20 +496,19 @@ async def generate_cases(
         generate_difference_case,
         generate_cross_ticker_difference_case,
         generate_multi_metric_calc_case,
-        generate_cagr_case,
     ]
 
     # Default distribution within completion cases
-    default_weights = [0.40, 0.15, 0.15, 0.15, 0.075, 0.075]
+    default_weights = [0.40, 0.15, 0.15, 0.15, 0.15]
 
     # Curriculum schedule (stage-specific weights and no-completion ratios)
     # Stage 1: emphasize no-completion + simple/latest
     # Stage 2: introduce differences
-    # Stage 3+: full mix incl. cross-ticker, multi-metric, CAGR
+    # Stage 3+: full mix
     stage_to_weights = {
-        1: ([0.70, 0.30, 0.00, 0.00, 0.00, 0.00], 0.10),
-        2: ([0.50, 0.20, 0.15, 0.15, 0.00, 0.00], 0.10),
-        3: ([0.40, 0.15, 0.15, 0.15, 0.075, 0.075], 0.10),
+        1: ([0.70, 0.30, 0.00, 0.00, 0.00], 0.10),
+        2: ([0.50, 0.20, 0.15, 0.15, 0.00], 0.10),
+        3: ([0.40, 0.15, 0.15, 0.15, 0.15], 0.10),
     }
 
     # Select weights and no-completion ratio based on curriculum stage (if provided)

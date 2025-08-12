@@ -14,13 +14,10 @@ If the text doesn't need financial data, return_answer(answer="NO_COMPLETION_NEE
 
 Otherwise, use the following tools:
 - get_value(metric, ticker, period): gets a specific value
-  - Inputs:
     - ticker may be a company name (e.g., "Apple") or the ticker (e.g., "AAPL")
     - metric may be a natural term (e.g., "net income", "price to earnings")
     - period may be "latest", a fiscal year (e.g., "2023", "FY2023", "2023FY"), or a quarter (e.g., "Q4 2023", "2023Q4")
-- calculate(num1, num2, operation, duration): operations are "add", "subtract", "multiply", "divide", "CAGR"
-    - for CAGR, duration is the number of time periods
-    - for CAGR, num1 is the final value and num2 is the initial value
+- calculate(num1, num2, operation): operations are "add", "subtract", "multiply", "divide"
 - return_answer(answer): returns the final completion text (ONLY the completion, not the full text)
 
 IMPORTANT RULES:
@@ -37,7 +34,7 @@ class AutocompleteAgent:
     Manages multi-turn conversations and tool interactions
     """
     
-    def __init__(self, model: Any = None, temperature: float = 0.1, max_tokens: int = 500):
+    def __init__(self, model: Any = None, temperature: float = 0.1, top_p: float = 1.0, max_tokens: int = 8192):
         """
         Initialize the autocomplete agent
         
@@ -48,6 +45,7 @@ class AutocompleteAgent:
         """
         self.model = model
         self.temperature = temperature
+        self.top_p = top_p
         self.max_tokens = max_tokens
         self.conversation: List[Dict[str, str]] = []
         self.conversation_choices: List[dict] = []
@@ -118,7 +116,7 @@ class AutocompleteAgent:
                 else:
                     self.conversation.append({
                         "role": "user",
-                        "content": "Please use the available tools to complete the task. Use return_answer(answer='your completion') to provide the final answer."
+                        "content": "Please use the available tools to complete the task."
                     })
                     continue
             
@@ -195,6 +193,7 @@ class AutocompleteAgent:
                     messages=messages,
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
+                    top_p=self.top_p,
                     logprobs=True,
                     store=False,
                 )
@@ -228,6 +227,7 @@ class AutocompleteAgent:
                 model="gpt-4.1",
                 messages=messages,
                 temperature=self.temperature,
+                top_p=self.top_p,
                 max_tokens=self.max_tokens
             )
             

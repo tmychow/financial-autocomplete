@@ -150,7 +150,8 @@ async def batch_evaluation(request: EvaluationRequest):
                                 model=self.name,
                                 messages=messages,
                                 temperature=0.1,
-                                max_tokens=500
+                                top_p=1.0,
+                                max_tokens=8192
                             )
                             return response.choices[0].message.content.strip()
                     
@@ -171,7 +172,7 @@ async def batch_evaluation(request: EvaluationRequest):
                                     return ollama.chat(
                                         model=self.name,
                                         messages=messages,
-                                        options={"temperature": 0.1}
+                                        options={"temperature": 0.1, "top_p": 1.0, "num_ctx": 8192}
                                     )
                                 response = await loop.run_in_executor(None, _chat)
                                 return response["message"]["content"].strip()

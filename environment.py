@@ -232,8 +232,7 @@ class FinancialEnvironment:
         Args:
             num1: First number
             num2: Second number
-            operation: Operation to perform (add, subtract, multiply, divide, CAGR)
-            duration: Duration for CAGR calculation (number of periods)
+            operation: Operation to perform (add, subtract, multiply, divide)
         """
         result = None
 
@@ -249,11 +248,6 @@ class FinancialEnvironment:
             result = num1 * num2
         elif operation == "divide":
             result = num1 / num2 if num2 != 0 else None
-        elif operation == "CAGR" and duration:
-            # CAGR calculation: ((final/initial)^(1/duration) - 1) * 100
-            # Allow CAGR when ratio is positive (handles negative values)
-            if num2 != 0 and duration > 0 and (num1 / num2) > 0:
-                result = ((num1 / num2) ** (1 / duration) - 1) * 100
         
         return result
     
