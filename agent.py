@@ -8,9 +8,11 @@ import asyncio
 import os
 from environment import FinancialEnvironment, parse_tool_calls_from_response
 
-SYSTEM_PROMPT = '''You are a financial data assistant that completes partial text with accurate financial data.
+SYSTEM_PROMPT = '''You are a financial data assistant. You will be given a piece of text in <input> tags, and you will need to figure out if it requires any financial data to complete.
 
-Available tools (YOU MUST USE THESE):
+If the text doesn't need financial data, return_answer(answer="NO_COMPLETION_NEEDED")
+
+Otherwise, use the following tools:
 - get_value(metric, ticker, period): gets a specific value
   - Inputs:
     - ticker may be a company name (e.g., "Apple") or the ticker (e.g., "AAPL")
@@ -21,21 +23,13 @@ Available tools (YOU MUST USE THESE):
     - for CAGR, num1 is the final value and num2 is the initial value
 - return_answer(answer): returns the final completion text (ONLY the completion, not the full text)
 
-If the text doesn't need financial data, use: return_answer(answer="NO_COMPLETION_NEEDED")
-
 IMPORTANT RULES:
 1. You MUST use tools - do not provide commentary or ask questions, and do not make up values
 2. This is a multi-turn conversation. After you call tools, you'll receive the results and can call more tools or return the answer
 3. Use one tool call at a time. Do not nest tool calls.
 4. If a tool returns an invalid response (e.g., starts with "Invalid" or is empty), retry by changing only the argument that likely failed (ticker, metric, or period). Keep other arguments fixed.
 5. Always end with return_answer() to provide your completion
-6. Only return the completion text, not the full sentence or any of the input text
-
-EXAMPLE:
-User: "The revenue for Apple in 2023 was"
-You: get_value(metric="revenue", ticker="Apple", period="2023")
-User: [value]
-You: return_answer(answer="$383.3 billion")'''
+6. Only return the text needed after the text in the <input> tag, not the full sentence or any of the input text'''
 
 class AutocompleteAgent:
     """
@@ -43,7 +37,7 @@ class AutocompleteAgent:
     Manages multi-turn conversations and tool interactions
     """
     
-    def __init__(self, model: Any = None, temperature: float = 0.8, max_tokens: int = 500):
+    def __init__(self, model: Any = None, temperature: float = 0.1, max_tokens: int = 500):
         """
         Initialize the autocomplete agent
         
@@ -85,7 +79,7 @@ class AutocompleteAgent:
         # Build initial conversation
         self.conversation = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Complete this text with financial data, if needed. If not, return_answer(answer='NO_COMPLETION_NEEDED'): '{text}'"}
+            {"role": "user", "content": f"<input>{text}</input>"}
         ]
         
         # Multi-turn conversation loop

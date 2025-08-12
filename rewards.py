@@ -60,10 +60,10 @@ For example, if the input is "Apple's revenue in 2023 was", the model should ret
 
 Please determine if the model's prediction is correct. Consider:
 - The model MUST return only the completion suffix, not repeat the input
-- Numeric values should be approximately equal (rounding to low precision is acceptable)
+- Numeric values should be approximately equal (rounding is acceptable)
 - Different formats are acceptable (e.g., "$1.2B" vs "$1.2 billion" vs "1200 million")
-- Formatting differences (e.g. $ vs USD, B vs billion) are acceptable
-- We care about the meaning, not the exact symbols or how natural the language is
+- Formatting differences are acceptable (e.g. $ vs USD, B vs billion vs billions)
+- We care about the meaning, not the symbols or how natural the language is
 - 0 does not mean no completion needed
 
 Please respond with your judgment in the following XML format:

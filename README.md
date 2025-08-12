@@ -80,4 +80,3 @@ The system fetches comprehensive financial data using exact Tiingo field names:
 ## TODO
 
 - [ ] Resume from checkpoint
-- [ ] Log trajectories to wandb

@@ -521,7 +521,7 @@ async def generate_cases(
     
     Args:
         num_cases: Number of cases to generate
-        no_completion_ratio: Ratio of no-completion cases (default 0.25)
+        no_completion_ratio: Ratio of no-completion cases (default 0.1)
     """
     tickers = await get_tickers_with_data()
     metrics = await get_all_metrics()
