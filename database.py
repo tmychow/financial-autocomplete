@@ -504,13 +504,20 @@ class TiingoDataLoader:
 
 # ============== Database Setup ==============
 
-async def setup_database(tiingo_api_key: str = None, force_reload: bool = False):
+async def setup_database(
+    tiingo_api_key: str = None,
+    force_reload: bool = False,
+    tickers: Optional[List[str]] = None,
+    max_tickers: Optional[int] = None,
+):
     """
     Setup database with Tiingo data
     
     Args:
         tiingo_api_key: Tiingo API key (will check env if not provided)
         force_reload: Force reload data even if it exists
+        tickers: Optional explicit list of ticker symbols to load (subset)
+        max_tickers: Optional maximum number of tickers to load from the default list
     
     Raises:
         ValueError: If no Tiingo API key is provided
@@ -611,7 +618,7 @@ async def setup_database(tiingo_api_key: str = None, force_reload: bool = False)
     loader = TiingoDataLoader(api_key)
     
     # Load all tickers for training (matching parent project)
-    tickers_to_load = [
+    all_tickers = [
         ("AAPL", "Apple Inc.", "Technology"),
         ("MSFT", "Microsoft Corporation", "Technology"),
         ("GOOGL", "Alphabet Inc.", "Technology"),
@@ -644,6 +651,20 @@ async def setup_database(tiingo_api_key: str = None, force_reload: bool = False)
         ("ANET", "Arista Networks Inc.", "Technology"),
     ]
     
+    # Apply subset selection if requested
+    if tickers:
+        wanted = {t.upper() for t in tickers}
+        tickers_to_load = [item for item in all_tickers if item[0].upper() in wanted]
+    else:
+        tickers_to_load = list(all_tickers)
+    
+    if max_tickers is not None:
+        tickers_to_load = tickers_to_load[: max(0, int(max_tickers))]
+    
+    if not tickers_to_load:
+        raise ValueError("No tickers selected to load. Provide valid 'tickers' or 'max_tickers'.")
+    
+    print(f"Preparing to load {len(tickers_to_load)} tickers...")
     success_count = 0
     for ticker, company_name, sector in tickers_to_load:
         if await loader.load_ticker_data(ticker, company_name, sector):

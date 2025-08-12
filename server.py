@@ -213,7 +213,7 @@ async def batch_evaluation(request: EvaluationRequest):
                     "tool_calls": episode_info["tool_calls_count"],
                     "tool_calls_log": tool_calls,  # Add full tool call log
                     "reasoning": reward_info.get("reasoning", ""),
-                        "used_search": reward_info.get("used_search", 0.0),
+                    "used_search": reward_info.get("used_search", 0.0),
                     "lookup_coverage": reward_info.get("lookup_coverage", 0.0),
                     "ticker_correct": reward_info.get("ticker_correct", 0.0),
                     "metric_correct": reward_info.get("metric_correct", 0.0),
