@@ -30,7 +30,9 @@ def clean_company_string(name: str) -> str:
 
 def normalize_text(text: str) -> str:
     s = (text or "").lower()
-    s = s.replace("-", " ")
+    # Treat common separators as spaces so variants like "book_value_per_share"
+    # and "book-value-per-share" normalize similarly to "book value per share".
+    s = s.replace("-", " ").replace("_", " ")
     s = re.sub(r"[^a-z0-9\s]", "", s)
     return _normalize_spaces(s)
 
@@ -154,23 +156,51 @@ def best_key_match(query: str, keys: Iterable[str], cutoff: float = 0.90) -> Opt
 
 
 def match_alias(query: str, alias_map: Dict[str, str], cutoff: float = 0.90) -> Optional[str]:
-    """Match a query against alias_map keys and return the mapped value when score >= cutoff."""
+    """Match a query against alias_map keys and return the mapped value when score >= cutoff.
+
+    We compare multiple query variants to be robust to punctuation, separators, and spacing.
+    """
     if not query or not alias_map:
         return None
-    # fast path exact
-    q = query.lower().strip()
-    if q in alias_map:
-        return alias_map[q]
-    # try normalized
-    qn = normalize_text(q)
-    if qn in alias_map:
-        return alias_map[qn]
-    # try compact (no spaces)
-    qc = qn.replace(" ", "")
-    if qc in alias_map:
-        return alias_map[qc]
-    # fuzzy over keys
-    key = best_key_match(q, alias_map.keys(), cutoff=cutoff)
-    return alias_map[key] if key else None
+
+    def _dedup_preserve_order(items):
+        seen = set()
+        result = []
+        for it in items:
+            if it not in seen and it:
+                seen.add(it)
+                result.append(it)
+        return result
+
+    q_raw = (query or "").lower().strip()
+    q_sep_spaces = q_raw.replace("-", " ").replace("_", " ")
+    q_norm = normalize_text(q_raw)
+    q_norm_compact = q_norm.replace(" ", "")
+    q_sep_compact = q_sep_spaces.replace(" ", "")
+    q_sig = token_signature(q_raw)
+    q_sig_from_sep = token_signature(q_sep_spaces)
+
+    variants = _dedup_preserve_order([
+        q_raw,
+        q_sep_spaces,
+        q_norm,
+        q_norm_compact,
+        q_sep_compact,
+        q_sig,
+        q_sig_from_sep,
+    ])
+
+    # Fast-path exact lookups on all variants
+    for v in variants:
+        if v in alias_map:
+            return alias_map[v]
+
+    # Fuzzy over keys using best_key_match for each variant
+    for v in variants:
+        key = best_key_match(v, alias_map.keys(), cutoff=cutoff)
+        if key:
+            return alias_map[key]
+
+    return None
 
 

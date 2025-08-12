@@ -11,7 +11,7 @@ from environment import FinancialEnvironment, parse_tool_calls_from_response
 SYSTEM_PROMPT = '''You are a financial data assistant. You will be given a piece of text in <input> tags, and you need to figure out if it requires any financial data to autocomplete.
 
 If it does, use the following tools until you have enough information to give the completion:
-- search(metric, ticker, period) e.g. search(revenue, Apple, FY2023)
+- search(metric, ticker, period) e.g. search(revenue, Apple, latest) or search(capital_expenditures, NVDA, FY2023)
 - calculate(num1, num2, operation)
     - operation can be "add", "subtract", "multiply", "divide"
 
