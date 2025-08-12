@@ -25,8 +25,38 @@ IMPORTANT RULES:
 2. This is a multi-turn conversation. After you call tools, you'll receive the results and can call more tools or return the answer
 3. Use one tool call at a time. Do not nest tool calls.
 4. If a tool returns an invalid response (e.g., starts with "Invalid" or is empty), retry by changing only the argument that likely failed (ticker, metric, or period). Keep other arguments fixed.
-5. Always end with return_answer() to provide your completion
-6. Only return the text needed after the text in the <input> tag, not the full sentence or any of the input text'''
+5. Only return the text needed after the text in the <input> tag, not the full sentence or any of the input text'''
+
+def _render_chatml(messages: List[Dict[str, str]]) -> str:
+    """
+    Render conversation into a ChatML-style transcript (similar to Ollama's default
+    Qwen template), without tool schema injection. Primes an assistant turn.
+    """
+    parts: List[str] = []
+    # First system message if present
+    system_msg = next((m.get("content", "") for m in messages if m.get("role") == "system"), None)
+    if system_msg:
+        parts.append("<|im_start|>system")
+        parts.append(system_msg)
+        parts.append("<|im_end|>")
+
+    for m in messages:
+        role = m.get("role")
+        if role == "system":
+            continue
+        content = m.get("content", "")
+        if role == "user":
+            parts.append("<|im_start|>user")
+            parts.append(content)
+            parts.append("<|im_end|>")
+        elif role == "assistant":
+            parts.append("<|im_start|>assistant")
+            parts.append(content)
+            parts.append("<|im_end|>")
+
+    # Prime the next assistant turn
+    parts.append("<|im_start|>assistant")
+    return "\n".join(parts)
 
 class AutocompleteAgent:
     """
@@ -188,15 +218,29 @@ class AutocompleteAgent:
             )
             
             try:
-                resp = await client.chat.completions.create(
-                    model=self.model.name,
-                    messages=messages,
-                    temperature=self.temperature,
-                    max_tokens=self.max_tokens,
-                    top_p=self.top_p,
-                    logprobs=True,
-                    store=False,
-                )
+                use_chatml = os.getenv("ART_USE_CHATML") == "1"
+                if use_chatml:
+                    prompt = _render_chatml(messages)
+                    resp = await client.chat.completions.create(
+                        model=self.model.name,
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=self.temperature,
+                        max_tokens=self.max_tokens,
+                        top_p=self.top_p,
+                        stop=["<|im_end|>"],
+                        logprobs=True,
+                        store=False,
+                    )
+                else:
+                    resp = await client.chat.completions.create(
+                        model=self.model.name,
+                        messages=messages,
+                        temperature=self.temperature,
+                        max_tokens=self.max_tokens,
+                        top_p=self.top_p,
+                        logprobs=True,
+                        store=False,
+                    )
                 
                 if resp and resp.choices:
                     # Return both content and choice for ART trajectory building
