@@ -52,7 +52,7 @@ Open http://localhost:8000 to:
 Open `finance_rl.ipynb` in Jupyter or Google Colab to train a model with RL.
 
 Reward signal: LLM-as-judge correctness plus tool-use bonuses:
-- Used `get_value`
+- Used `search`
 - Coverage of required lookups
 - Separate sub-scores for correct ticker, metric, period
 
@@ -60,7 +60,7 @@ Reward signal: LLM-as-judge correctness plus tool-use bonuses:
 
 - **`database.py`** - Database setup with Tiingo statements + daily data endpoints
 - **`synthetic.py`** - Generates test cases from database
-- **`environment.py`** - Financial tool execution (tools: `get_value`, `calculate`, `return_answer`)
+- **`environment.py`** - Financial tool execution (tools: `search`, `calculate`, `return_answer`)
 - **`agent.py`** - Multi-turn LLM agent
 - **`rewards.py`** - LLM-as-judge evaluation + tool-use and lookup-coverage bonuses
 - **`rollout.py`** - Training trajectory generation

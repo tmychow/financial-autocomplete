@@ -138,7 +138,7 @@ async def calculate_reward(
     # Additional reward components
     # Weights (configurable via env)
     W_JUDGE = float(os.getenv("W_JUDGE", "1.0"))
-    W_USED_GET_VALUE = float(os.getenv("W_USED_GET_VALUE", "0.1"))
+    W_USED_SEARCH = float(os.getenv("W_USED_SEARCH", "0.1"))
     # Keep combined coverage available but default to 0 (replaced by separate components)
     W_COVERAGE = float(os.getenv("W_COVERAGE", "0.0"))
     # New separate components
@@ -150,19 +150,19 @@ async def calculate_reward(
     case_type = (case_metadata or {}).get("type") if isinstance(case_metadata, dict) else None
     is_no_completion = case_type == "no_completion" or ground_truth == "NO_COMPLETION_NEEDED"
 
-    # Used get_value flag
-    used_get_value = 0.0
+    # Used search flag
+    used_search = 0.0
     lookup_coverage = 0.0
     ticker_correct = 0.0
     metric_correct = 0.0
     period_correct = 0.0
 
     if tool_calls and not is_no_completion:
-        used_get_value = 1.0 if any(tc.get("tool") == "get_value" for tc in tool_calls) else 0.0
+        used_search = 1.0 if any(tc.get("tool") == "search" for tc in tool_calls) else 0.0
         # Build observed lookups from results
         observed = set()
         for tc in tool_calls:
-            if tc.get("tool") == "get_value":
+            if tc.get("tool") == "search":
                 res = tc.get("result")
                 if isinstance(res, dict):
                     mt = res.get("metric")
@@ -225,7 +225,7 @@ async def calculate_reward(
     # Total reward
     total_reward = (
         W_JUDGE * correctness_score
-        + (0.0 if is_no_completion else W_USED_GET_VALUE * used_get_value)
+        + (0.0 if is_no_completion else W_USED_SEARCH * used_search)
         + (0.0 if is_no_completion else W_COVERAGE * lookup_coverage)
         + (0.0 if is_no_completion else W_TICKER * ticker_correct)
         + (0.0 if is_no_completion else W_METRIC * metric_correct)
@@ -241,7 +241,7 @@ async def calculate_reward(
         "max_turns_reached": max_turns_reached,
         "error_occurred": error_occurred,
         "reasoning": reasoning,
-        "used_get_value": used_get_value,
+        "used_search": used_search,
         "lookup_coverage": lookup_coverage,
         "ticker_correct": ticker_correct,
         "metric_correct": metric_correct,

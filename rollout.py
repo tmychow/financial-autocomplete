@@ -148,7 +148,7 @@ async def run_single_rollout(
             "latency": latency,
             "step": step,
             "rollout_id": rollout_id,
-            "used_get_value": reward_info.get("used_get_value", 0.0),
+            "used_search": reward_info.get("used_search", 0.0),
             "lookup_coverage": reward_info.get("lookup_coverage", 0.0),
         }
         

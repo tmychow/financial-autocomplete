@@ -17,7 +17,7 @@ from textmatch import (
 
 class ToolName(Enum):
     """Available tools in the financial environment"""
-    GET_VALUE = "get_value"
+    SEARCH = "search"
     CALCULATE = "calculate"
     RETURN_ANSWER = "return_answer"
 
@@ -64,13 +64,13 @@ class FinancialEnvironment:
         """
         result = None
         
-        if tool_name == ToolName.GET_VALUE.value:
+        if tool_name == ToolName.SEARCH.value:
             # Require all args before calling
             required = ["metric", "ticker", "period"]
             if not all(k in arguments and isinstance(arguments[k], str) and arguments[k].strip() for k in required):
-                result = "Invalid tool usage: get_value expects metric, ticker, and period."
+                result = "Invalid tool usage: search expects metric, ticker, and period."
             else:
-                result = await self._get_value(**arguments)
+                result = await self._search(**arguments)
         elif tool_name == ToolName.CALCULATE.value:
             # Require num1, num2, operation before calling
             required = ["num1", "num2", "operation"]
@@ -92,7 +92,7 @@ class FinancialEnvironment:
         
         return result
     
-    async def _get_value(self, metric: str, ticker: str, period: str) -> Optional[Dict[str, Any]]:
+    async def _search(self, metric: str, ticker: str, period: str) -> Optional[Dict[str, Any]]:
         """
         Get a specific financial value
         
@@ -322,7 +322,7 @@ def parse_tool_calls_from_response(response: str) -> List[Dict[str, Any]]:
     
     # Define function signatures and their expected parameters
     tool_signatures = {
-        "get_value": ["metric", "ticker", "period"],
+        "search": ["metric", "ticker", "period"],
         "calculate": ["num1", "num2", "operation", "duration"],
         "return_answer": ["answer"]
     }
@@ -452,13 +452,13 @@ if __name__ == "__main__":
         
         # Get a value with flexible inputs
         value = await env.execute_tool(
-            "get_value",
+            "search",
             {"metric": "net income", "ticker": "Apple", "period": "2023"}
         )
         print(f"Apple 2023 net income: {value}")
 
         value2 = await env.execute_tool(
-            "get_value",
+            "search",
             {"metric": "price to earnings", "ticker": "alphabet", "period": "latest"}
         )
         print(f"Alphabet latest P/E: {value2}")
@@ -486,7 +486,7 @@ if __name__ == "__main__":
         
         # Test parser
         print("\nTesting tool call parser...")
-        test_response = 'get_value(metric="revenue", ticker="AAPL", period="2023FY")'
+        test_response = 'search(metric="revenue", ticker="AAPL", period="2023FY")'
         parsed = parse_tool_calls_from_response(test_response)
         print(f"Parsed: {parsed}")
     

@@ -8,21 +8,22 @@ import asyncio
 import os
 from environment import FinancialEnvironment, parse_tool_calls_from_response
 
-SYSTEM_PROMPT = '''You are a financial data assistant. You will be given a piece of text in <input> tags, and you will need to figure out if it requires any financial data to complete.
+SYSTEM_PROMPT = '''You are a financial data assistant. You will be given a piece of text in <input> tags, and you need to figure out if it requires any financial data to autocomplete.
 
-If it does, use the following tools:
-- get_value(metric, ticker, period) e.g. get_value(revenue, Apple, FY2023)
+If it does, use the following tools until you have enough information to give the completion:
+- search(metric, ticker, period) e.g. search(revenue, Apple, FY2023)
 - calculate(num1, num2, operation)
     - operation can be "add", "subtract", "multiply", "divide"
-- return_answer(completion): returns the final completion text
+
+Then use return_answer(completion) to give the completion.
 
 If the text doesn't need financial data, return_answer("")
 
 IMPORTANT RULES:
-1. This is a multi-turn task. Use the tools above, and after each tool use, you'll receive the results and can call more tools or return the answer
+1. This is a multi-turn task. After each tool use, you'll receive the results and can call more tools or return the answer
 2. Use one tool at a time. Do not nest tool calls.
 3. If a tool returns an invalid response, retry by changing the arguments.
-4. Only put the completion in the return_answer(completion) tool, not the text in <input> tags'''
+4. Only put the completion within the return_answer(completion) tool, not the text in <input> tags'''
 
 def _render_chatml(messages: List[Dict[str, str]]) -> str:
     """
