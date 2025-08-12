@@ -80,3 +80,5 @@ The system fetches comprehensive financial data using exact Tiingo field names:
 ## TODO
 
 - [ ] Resume from checkpoint
+- [ ] Make sure we generate non-contaminated cases in validation
+- [ ] Making sure we aren't overfitting to the training data due to insufficient diversity
