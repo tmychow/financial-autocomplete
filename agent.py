@@ -55,7 +55,7 @@ class AutocompleteAgent:
     Manages multi-turn conversations and tool interactions
     """
     
-    def __init__(self, model: Any = None, temperature: float = 0.1, top_p: float = 1.0, max_tokens: int = 1024):
+    def __init__(self, model: Any = None, temperature: float = 0.1, top_p: float = 1.0, max_tokens: int = 512):
         """
         Initialize the autocomplete agent
         
@@ -102,6 +102,13 @@ class AutocompleteAgent:
         ]
         
         # Multi-turn conversation loop
+        import re as _re
+
+        # Per-turn telemetry for rewards
+        assistant_turn_lengths: List[int] = []
+        assistant_turn_tool_calls_per_turn: List[int] = []
+        assistant_turn_valid_format: List[bool] = []
+
         for turn in range(max_turns):
             # Get model response
             response = await self._call_model(self.conversation)
@@ -119,6 +126,16 @@ class AutocompleteAgent:
             # Add assistant response to history FIRST so we always have a matching assistant turn
             # for any Choice/logprob object returned by the model (required by ART tokenization).
             self.conversation.append({"role": "assistant", "content": response_text})
+
+            # Telemetry: compute per-turn stats based on raw assistant text
+            resp_len = len(response_text or "")
+            assistant_turn_lengths.append(resp_len)
+            # Count raw tool-call occurrences in the turn (even if executor only runs the first)
+            tool_call_count = len(_re.findall(r"\b(?:search|calculate|return_answer)\s*\(", response_text or ""))
+            assistant_turn_tool_calls_per_turn.append(tool_call_count)
+            # Valid format = exactly one tool call and nothing else
+            is_valid_format = bool(_re.fullmatch(r"\s*(?:search|calculate|return_answer)\s*\([\s\S]*\)\s*", response_text or "")) and tool_call_count == 1
+            assistant_turn_valid_format.append(is_valid_format)
 
             # Check if no completion needed
             if "NO_COMPLETION_NEEDED" in response_text:
@@ -175,7 +192,13 @@ class AutocompleteAgent:
             "turns": len([m for m in self.conversation if m["role"] == "assistant"]),
             "tool_calls_count": len(self.environment.tool_calls),
             "completed": self.environment.is_complete(),
-            "max_turns_reached": turn >= (max_turns - 1)
+            "max_turns_reached": turn >= (max_turns - 1),
+            # New telemetry for reward shaping
+            "assistant_turn_lengths": assistant_turn_lengths,
+            "assistant_turn_tool_calls_per_turn": assistant_turn_tool_calls_per_turn,
+            "assistant_turn_valid_format": assistant_turn_valid_format,
+            "invalid_format_turns_count": sum(1 for v in assistant_turn_valid_format if not v),
+            "total_characters": sum(assistant_turn_lengths) if assistant_turn_lengths else 0,
         }
         
         return (

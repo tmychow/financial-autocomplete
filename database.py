@@ -604,7 +604,7 @@ async def setup_database(
         ("roe", "Return on Equity", "%"),
         ("epsQoQ", "EPS Growth Quarter over Quarter", "%"),
         ("bvps", "Book Value Per Share", "USD"),
-        ("bookVal", "Book Value", "USD_billions"),
+        # ("bookVal", "Book Value", "USD_billions"),
         
         # Daily metrics
         ("marketCap", "Market Capitalization", "USD_billions"),

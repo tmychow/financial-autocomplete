@@ -56,13 +56,12 @@ Ground Truth (the completion only): {ground_truth}
 Model Prediction: {prediction}
 
 CRITICAL: This is an autocomplete task, so the model should return ONLY the completion text, NOT the full sentence.
-For example, if the input is "Apple's revenue in 2023 was", the model should return "$383.3 billion", NOT "Apple's revenue in 2023 was $383.3 billion".
+For example, if the input is "Apple's revenue in 2023 was", the model should return "$383.3 billion" or "383 USD billion" or "383B" or similar, NOT "Apple's revenue in 2023 was $383.3 billion".
 
 Please determine if the model's prediction is correct. Consider:
 - The model MUST return only the completion suffix, not repeat the input
 - Numeric values should be approximately equal (rounding is acceptable)
-- Different formats are acceptable (e.g., "$1.2B" vs "$1.2 billion" vs "1200 million")
-- Formatting differences are acceptable (e.g. $ vs USD, B vs billion vs billions)
+- Formatting differences are fine e.g. missing $, using USD instead of $, B or billion or billions, and so on: "$1.2B" vs "1.2 USD billions" vs "1200 million" should all be accepted
 - We care about the meaning, not the symbols or how natural the language is
 - 0 does not mean no completion needed
 
@@ -222,8 +221,63 @@ async def calculate_reward(
             metric_correct = metric_hits / total
             period_correct = period_hits / total
 
-    # Total reward
-    total_reward = (
+    # ========= New negative rewards (penalties) =========
+    # Configurable weights and scales via env vars
+    # Character-length penalty
+    CHAR_THRESHOLD = int(os.getenv("CHAR_THRESHOLD", "150"))
+    W_CHAR_PENALTY = float(os.getenv("W_CHAR_PENALTY", "0.5"))
+    K_CHAR_SCALE = float(os.getenv("K_CHAR_SCALE", "0.01"))  # per excess character
+
+    # Tool-calls-per-turn penalty (excess over 1 per assistant turn)
+    W_TOOLCALLS_PER_TURN_PENALTY = float(os.getenv("W_TOOLCALLS_PER_TURN_PENALTY", "0.5"))
+    K_TOOLCALLS_PER_TURN_SCALE = float(os.getenv("K_TOOLCALLS_PER_TURN_SCALE", "0.5"))
+
+    # Turns penalty (excess over threshold total turns)
+    TURNS_THRESHOLD = int(os.getenv("TURNS_THRESHOLD", "5"))
+    W_TURNS_PENALTY = float(os.getenv("W_TURNS_PENALTY", "0.2"))
+    K_TURNS_SCALE = float(os.getenv("K_TURNS_SCALE", "1"))
+
+    # Invalid-format (non-DSL) penalty as binary switch
+    W_FORMAT_PENALTY = float(os.getenv("W_FORMAT_PENALTY", "0.3"))
+
+    # Safely extract telemetry
+    turn_lengths: List[int] = episode_info.get("assistant_turn_lengths", []) or []
+    tool_calls_per_turn: List[int] = episode_info.get("assistant_turn_tool_calls_per_turn", []) or []
+    valid_format_flags: List[bool] = episode_info.get("assistant_turn_valid_format", []) or []
+
+    # 1) Characters over threshold (sum of per-turn overages)
+    total_char_overage = 0
+    for n in turn_lengths:
+        try:
+            nn = int(n)
+        except Exception:
+            nn = 0
+        if nn > CHAR_THRESHOLD:
+            total_char_overage += (nn - CHAR_THRESHOLD)
+    char_penalty = K_CHAR_SCALE * total_char_overage
+
+    # 2) Tool calls per turn: penalize linear excess over 1, summed across turns
+    total_toolcall_excess = 0
+    for c in tool_calls_per_turn:
+        try:
+            cc = int(c)
+        except Exception:
+            cc = 0
+        if cc > 1:
+            total_toolcall_excess += (cc - 1)
+    toolcalls_per_turn_penalty = K_TOOLCALLS_PER_TURN_SCALE * total_toolcall_excess
+
+    # 3) Number of turns: penalize linear excess over threshold
+    total_turns = int(episode_info.get("turns", 0) or 0)
+    turns_excess = max(0, total_turns - TURNS_THRESHOLD)
+    turns_penalty = K_TURNS_SCALE * turns_excess
+
+    # 4) Invalid format (binary): any assistant turn not fully inside a single tool call
+    any_invalid_format = any(v is False for v in valid_format_flags) if valid_format_flags else False
+    format_penalty = 1.0 if any_invalid_format else 0.0
+
+    # Positive components (existing)
+    positive_reward = (
         W_JUDGE * correctness_score
         + (0.0 if is_no_completion else W_USED_SEARCH * used_search)
         + (0.0 if is_no_completion else W_COVERAGE * lookup_coverage)
@@ -231,6 +285,16 @@ async def calculate_reward(
         + (0.0 if is_no_completion else W_METRIC * metric_correct)
         + (0.0 if is_no_completion else W_PERIOD * period_correct)
     )
+
+    # Combine with penalties
+    total_penalty = (
+        W_CHAR_PENALTY * char_penalty
+        + W_TOOLCALLS_PER_TURN_PENALTY * toolcalls_per_turn_penalty
+        + W_TURNS_PENALTY * turns_penalty
+        + W_FORMAT_PENALTY * format_penalty
+    )
+
+    total_reward = positive_reward - total_penalty
 
     return {
         "total_reward": total_reward,
@@ -246,6 +310,19 @@ async def calculate_reward(
         "ticker_correct": ticker_correct,
         "metric_correct": metric_correct,
         "period_correct": period_correct,
+        # Penalty diagnostics
+        "char_penalty": char_penalty,
+        "toolcalls_per_turn_penalty": toolcalls_per_turn_penalty,
+        "turns_penalty": turns_penalty,
+        "format_penalty_applied": 1.0 if any_invalid_format else 0.0,
+        "total_penalty": total_penalty,
+        "telemetry": {
+            "assistant_turn_lengths": turn_lengths,
+            "assistant_turn_tool_calls_per_turn": tool_calls_per_turn,
+            "assistant_turn_valid_format": valid_format_flags,
+            "char_threshold": CHAR_THRESHOLD,
+            "turns_threshold": TURNS_THRESHOLD,
+        },
     }
 
 # ============== Batch Reward Calculation ==============

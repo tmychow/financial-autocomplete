@@ -151,7 +151,7 @@ async def batch_evaluation(request: EvaluationRequest):
                                 messages=messages,
                                 temperature=0.1,
                                 top_p=1.0,
-                                max_tokens=1024
+                                max_tokens=512
                             )
                             return response.choices[0].message.content.strip()
                     
@@ -172,7 +172,7 @@ async def batch_evaluation(request: EvaluationRequest):
                                     return ollama.chat(
                                         model=self.name,
                                         messages=messages,
-                                        options={"temperature": 0.1, "top_p": 1.0, "num_predict": 1024}
+                                        options={"temperature": 0.1, "top_p": 1.0, "num_predict": 512}
                                     )
                                 response = await loop.run_in_executor(None, _chat)
                                 return response["message"]["content"].strip()
@@ -212,12 +212,22 @@ async def batch_evaluation(request: EvaluationRequest):
                     "judge_score": reward_info.get("correctness_score", None),
                     "tool_calls": episode_info["tool_calls_count"],
                     "tool_calls_log": tool_calls,  # Add full tool call log
+                    "turns": episode_info.get("turns", None),
+                    "conversation": agent.get_conversation(),
                     "reasoning": reward_info.get("reasoning", ""),
                     "used_search": reward_info.get("used_search", 0.0),
                     "lookup_coverage": reward_info.get("lookup_coverage", 0.0),
                     "ticker_correct": reward_info.get("ticker_correct", 0.0),
                     "metric_correct": reward_info.get("metric_correct", 0.0),
                     "period_correct": reward_info.get("period_correct", 0.0),
+                    # Negative reward components
+                    "total_penalty": reward_info.get("total_penalty", 0.0),
+                    "char_penalty": reward_info.get("char_penalty", 0.0),
+                    "toolcalls_per_turn_penalty": reward_info.get("toolcalls_per_turn_penalty", 0.0),
+                    "turns_penalty": reward_info.get("turns_penalty", 0.0),
+                    "format_penalty_applied": reward_info.get("format_penalty_applied", 0.0),
+                    # Telemetry (optional for UI)
+                    "telemetry": reward_info.get("telemetry", {}),
                 }
                 
                 if reward_info["is_correct"]:

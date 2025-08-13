@@ -826,6 +826,7 @@
                     if (modelResult.tool_calls !== undefined) {
                         html += `<div class="stats-row">
                             <span>Tool calls: ${modelResult.tool_calls}</span>
+                            <span>Turns: ${modelResult.turns ?? 'N/A'}</span>
                             <span>Total Reward: ${modelResult.reward?.toFixed(3) || 'N/A'}</span>
                             <span>Judge: ${(modelResult.judge_score ?? modelResult.reward)?.toFixed?.(3) || modelResult.judge_score || 'N/A'}</span>
                             <span>Used search: ${(modelResult.used_search ?? 0).toFixed(2)}</span>
@@ -834,6 +835,23 @@
                             <span>Metric: ${(modelResult.metric_correct ?? 0).toFixed(2)}</span>
                             <span>Period: ${(modelResult.period_correct ?? 0).toFixed(2)}</span>
                         </div>`;
+                        // Negative reward breakdown row
+                        html += `<div class="stats-row">
+                            <span>Penalty (total): ${(modelResult.total_penalty ?? 0).toFixed(3)}</span>
+                            <span>Chars penalty: ${(modelResult.char_penalty ?? 0).toFixed(3)}</span>
+                            <span>Toolcalls/turn penalty: ${(modelResult.toolcalls_per_turn_penalty ?? 0).toFixed(3)}</span>
+                            <span>Turns penalty: ${(modelResult.turns_penalty ?? 0).toFixed(3)}</span>
+                            <span>Invalid format: ${modelResult.format_penalty_applied ? 'Yes' : 'No'}</span>
+                        </div>`;
+                        // Optional telemetry details
+                        if (modelResult.telemetry) {
+                            const t = modelResult.telemetry;
+                            html += `<div class="stats-row">
+                                <span>Turns: ${(t.assistant_turn_lengths || []).length}</span>
+                                <span>Char thr: ${t.char_threshold ?? '—'}</span>
+                                <span>Turn thr: ${t.turns_threshold ?? '—'}</span>
+                            </div>`;
+                        }
                     }
                     
                     // Add judge reasoning if available
@@ -876,6 +894,21 @@
                         });
                         
                         html += '</div>';
+                    }
+
+                    // Add collapsible conversation view to inspect extra turns
+                    if (Array.isArray(modelResult.conversation)) {
+                        const convId = `conv-${idx}-${model.replace(/[^a-z0-9]/gi, '')}`;
+                        const convText = modelResult.conversation.map(m => `${(m.role||'').toUpperCase()}: ${m.content || ''}`).join('\n\n');
+                        html += `
+                            <div class="collapsible" onclick="toggleCollapsible('${convId}')">
+                                <span>🗨️ View Conversation (${modelResult.conversation.length} messages)</span>
+                                <span class="collapsible-arrow">▶</span>
+                            </div>
+                            <div id="${convId}" class="collapsible-content">
+                                <pre style="white-space: pre-wrap;">${escapeHtml(convText)}</pre>
+                            </div>
+                        `;
                     }
                 }
                 
