@@ -222,7 +222,7 @@ async def calculate_reward(
     # ========= New negative rewards (penalties) =========
     # Configurable weights and scales via env vars
     # Character-length penalty
-    CHAR_THRESHOLD = int(os.getenv("CHAR_THRESHOLD", "150"))
+    CHAR_THRESHOLD = int(os.getenv("CHAR_THRESHOLD", "125"))
     W_CHAR_PENALTY = float(os.getenv("W_CHAR_PENALTY", "0.5"))
     K_CHAR_SCALE = float(os.getenv("K_CHAR_SCALE", "0.01"))  # per excess character
 
