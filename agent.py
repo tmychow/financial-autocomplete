@@ -8,22 +8,15 @@ import asyncio
 import os
 from environment import FinancialEnvironment, parse_tool_calls_from_response
 
-SYSTEM_PROMPT = '''You are a financial data assistant. You will be given a piece of text in <input> tags, and you need to figure out if it requires any financial data to autocomplete.
+SYSTEM_PROMPT = '''You are a financial data assistant. You will be given the start of a sentence in <input> tags, and you need to decide if continuing the sentence requires financial data.
 
-If it does, use the following tools until you have enough information to give the completion:
-- search(metric, ticker, period) e.g. search(revenue, Apple, latest) or search(capital_expenditures, NVDA, FY2023)
-- calculate(num1, num2, operation)
-    - operation can be "add", "subtract", "multiply", "divide"
+If the continuation doesn't require financial data, use return_answer("").
 
-Then use return_answer(completion) to give the completion.
+If it does, use search(metric, company, period) e.g. search(revenue, Apple, latest) or search(capital_expenditures, NVDA, FY2023) to get the data needed. If you need to combine more than one piece of data, use calculate(num1, num2, operation) where operation can be "add", "subtract", "multiply", "divide".
 
-If the text doesn't need financial data, return_answer("")
+After each tool use, you will receive the results and can call more tools. If a tool returns an invalid response, try again with different arguments.
 
-IMPORTANT RULES:
-1. This is a multi-turn task. After each tool use, you'll receive the results and can call more tools or return the answer
-2. Use one tool at a time. Do not nest tool calls.
-3. If a tool returns an invalid response, retry by changing the arguments.
-4. Only put the completion within the return_answer(completion) tool, not the text in <input> tags'''
+When you have enough information, use return_answer() to continue the sentence e.g. return_answer("100 billion"). Do not include the <input> text in return_answer().'''
 
 def _render_chatml(messages: List[Dict[str, str]]) -> str:
     """
@@ -62,7 +55,7 @@ class AutocompleteAgent:
     Manages multi-turn conversations and tool interactions
     """
     
-    def __init__(self, model: Any = None, temperature: float = 0.1, top_p: float = 1.0, max_tokens: int = 8192):
+    def __init__(self, model: Any = None, temperature: float = 0.1, top_p: float = 1.0, max_tokens: int = 1024):
         """
         Initialize the autocomplete agent
         

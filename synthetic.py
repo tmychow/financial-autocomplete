@@ -166,19 +166,19 @@ async def generate_simple_case(tickers: List[str], metrics: List[Dict[str, str]]
             "{period} saw {company}'s {desc} at ",
         ]
         
-        # Templates without period (should use latest period)
-        templates_without_period = [
-            "{company} reported {desc} of ",
-            "{company}'s {desc} is ",
-            "The {desc} for {company} is ",
-            "{company} has {desc} of ",
-            "Currently, {company}'s {desc} is ",
-            "For {company}, {desc} is ",
-            "{company} shows {desc} of ",
-        ]
+        # # Templates without period (should use latest period)
+        # templates_without_period = [
+        #     "{company} reported {desc} of ",
+        #     "{company}'s {desc} is ",
+        #     "The {desc} for {company} is ",
+        #     "{company} has {desc} of ",
+        #     "Currently, {company}'s {desc} is ",
+        #     "For {company}, {desc} is ",
+        #     "{company} shows {desc} of ",
+        # ]
         
         # Randomly choose which type of template to use
-        use_period_template = random.random() < 0.6  # 60% with period, 40% without
+        use_period_template = random.random() < 1.1  # 100% with period
         
         if use_period_template:
             period = await random_period(ticker, metric["metric_name"])
@@ -190,16 +190,16 @@ async def generate_simple_case(tickers: List[str], metrics: List[Dict[str, str]]
                 desc=metric["description"].lower(),
                 period=period,
             )
-        else:
-            # Use latest period for templates without period
-            period = await get_latest_period(ticker, metric["metric_name"])
-            if not period:
-                continue
-            template = random.choice(templates_without_period)
-            prefix = template.format(
-                company=await get_company_name(ticker),
-                desc=metric["description"].lower(),
-            )
+        # else:
+        #     # Use latest period for templates without period
+        #     period = await get_latest_period(ticker, metric["metric_name"])
+        #     if not period:
+        #         continue
+        #     template = random.choice(templates_without_period)
+        #     prefix = template.format(
+        #         company=await get_company_name(ticker),
+        #         desc=metric["description"].lower(),
+        #     )
         
         value = await get_financial_value(ticker, metric["metric_name"], period)
         if not value:
