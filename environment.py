@@ -184,40 +184,101 @@ class FinancialEnvironment:
             return "latest"
         # FY patterns
         import re as _re
-        fy_match = _re.fullmatch(r"(fy)?(\d{4})(fy)?", s)
+        # Allow separators like space/underscore/hyphen by compacting them away for matching
+        s_compact = _re.sub(r"[\s_\-]+", "", s)
+        # FY: accept FY2023, 2023FY, FY_2023, 2023_FY, etc.
+        fy_match = _re.fullmatch(r"(fy)?(\d{4})(fy)?", s_compact)
         if fy_match:
             year = fy_match.group(2)
             return f"{year}FY"
         # Quarter patterns like Q4 2023, 2023 Q4, 2023Q4
-        q_match = _re.fullmatch(r"q([1-4])\s*(\d{4})", s)
+        # Accept Q3 2023, Q3_2023, Q3-2023, 2023 Q3, 2023_Q3, 2023-Q3, and compact forms
+        q_match = _re.fullmatch(r"q([1-4])(\d{4})", s_compact)
         if q_match:
             q = q_match.group(1)
             year = q_match.group(2)
             return f"{year}Q{q}"
-        q_match2 = _re.fullmatch(r"(\d{4})\s*q([1-4])", s)
+        q_match2 = _re.fullmatch(r"(\d{4})q([1-4])", s_compact)
         if q_match2:
             year = q_match2.group(1)
             q = q_match2.group(2)
             return f"{year}Q{q}"
-        q_match3 = _re.fullmatch(r"(\d{4})q([1-4])", s)
+        # As a convenience, also handle the original spaced form (e.g., "q3 2023")
+        q_match3 = _re.fullmatch(r"q([1-4])\s*(\d{4})", s)
         if q_match3:
-            year = q_match3.group(1)
-            q = q_match3.group(2)
+            q = q_match3.group(1)
+            year = q_match3.group(2)
+            return f"{year}Q{q}"
+        q_match4 = _re.fullmatch(r"(\d{4})\s*q([1-4])", s)
+        if q_match4:
+            year = q_match4.group(1)
+            q = q_match4.group(2)
             return f"{year}Q{q}"
         # As a fallback, try to match by year and optional quarter tokens within available periods
         try:
             periods = await get_available_periods(ticker, metric)
         except Exception:
             periods = []
-        tokens = s.replace(",", " ").replace("/", " ").split()
+        # Tokenize more flexibly: treat common separators as spaces
+        tokens = _re.sub(r"[,_/\-]+", " ", s).split()
         year_tokens = [t for t in tokens if t.isdigit() and len(t) == 4]
-        quarter_tokens = [t for t in tokens if t in {"q1", "q2", "q3", "q4", "1", "2", "3", "4"}]
-        for p in periods:
-            if year_tokens and year_tokens[0] not in p:
-                continue
-            if any(q in p.lower() for q in quarter_tokens) or not quarter_tokens:
-                return p
-        return None
+        quarter_tokens = [t for t in tokens if t.lower() in {"q1", "q2", "q3", "q4", "1", "2", "3", "4"}]
+
+        # If the user clearly tried to specify a quarter/FY but it's malformed, treat as invalid
+        has_q_like = any(t.lower().startswith('q') for t in tokens)
+        has_fy_like = any(t.lower().startswith('fy') for t in tokens)
+        if has_q_like and not quarter_tokens:
+            return None
+        # If FY-like token exists but earlier FY regex didn't match, treat as invalid rather than falling back
+        if has_fy_like and not _re.fullmatch(r"(fy)?(\d{4})(fy)?", s_compact):
+            return None
+
+        # Require at least a 4-digit year to use fallback; otherwise, treat as invalid
+        if not year_tokens:
+            return None
+
+        year = year_tokens[0]
+
+        # Helper to filter periods by year
+        periods_for_year = [p for p in periods if year in p]
+        if not periods_for_year:
+            return None
+
+        # If quarter is specified, require an exact year+quarter match
+        if quarter_tokens:
+            # Normalize quarter token to Qn
+            qt = None
+            for qt_raw in quarter_tokens:
+                if qt_raw.lower().startswith('q') and len(qt_raw) == 2 and qt_raw[1] in '1234':
+                    qt = qt_raw[1]
+                    break
+                if qt_raw in {"1", "2", "3", "4"}:
+                    qt = qt_raw
+                    break
+            if qt is None:
+                return None
+            target = f"{year}Q{qt}"
+            for p in periods_for_year:
+                if p == target:
+                    return p
+            # If exact not found, invalid
+            return None
+
+        # No quarter specified: prefer FY for that year if present, else latest quarter within that year
+        fy = f"{year}FY"
+        if fy in periods_for_year:
+            return fy
+        # Choose the highest quarter number available for that year
+        best_q = 0
+        best_period = None
+        for p in periods_for_year:
+            m = _re.fullmatch(rf"{year}Q([1-4])", p)
+            if m:
+                qn = int(m.group(1))
+                if qn > best_q:
+                    best_q = qn
+                    best_period = p
+        return best_period
     
     def _calculate(
         self,

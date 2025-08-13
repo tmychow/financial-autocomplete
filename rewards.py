@@ -61,7 +61,7 @@ For example, if the input is "Apple's revenue in 2023 was", the model should ret
 Please determine if the model's prediction is correct. Consider:
 - The model MUST return only the completion suffix, not repeat the input
 - Numeric values should be approximately equal (rounding is acceptable)
-- Formatting differences are fine e.g. missing $, using USD instead of $, B or billion or billions, and so on: "$1.2B" vs "1.2 USD billions" vs "1200 million" should all be accepted
+- Formatting differences are fine e.g. missing $, using USD instead of $, B or billion or billions, and so on: "$1.2B" vs "1.2 USD_billions" vs "1200 million" should all be accepted
 - We care about the meaning, not the symbols or how natural the language is
 - 0 does not mean no completion needed
 
