@@ -473,6 +473,13 @@
                             <input type="number" id="filter-step-max" placeholder="Max step" style="width: 120px; margin-left: 10px;">
                         </div>
                     </div>
+                    <div class="form-group">
+                        <label>Latency Range (seconds)</label>
+                        <div>
+                            <input type="number" id="filter-lat-min" placeholder="Min s" step="0.01" style="width: 120px;">
+                            <input type="number" id="filter-lat-max" placeholder="Max s" step="0.01" style="width: 120px; margin-left: 10px;">
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -521,6 +528,8 @@
         document.getElementById('filter-validation').addEventListener('change', renderLogs);
         document.getElementById('filter-step-min').addEventListener('input', renderLogs);
         document.getElementById('filter-step-max').addEventListener('input', renderLogs);
+        document.getElementById('filter-lat-min').addEventListener('input', renderLogs);
+        document.getElementById('filter-lat-max').addEventListener('input', renderLogs);
 
         function renderLogs() {
             const container = document.getElementById('logs-container');
@@ -536,8 +545,12 @@
             const onlyValidation = document.getElementById('filter-validation').checked;
             let minStep = parseInt(document.getElementById('filter-step-min').value);
             let maxStep = parseInt(document.getElementById('filter-step-max').value);
+            let minLatency = parseFloat(document.getElementById('filter-lat-min').value);
+            let maxLatency = parseFloat(document.getElementById('filter-lat-max').value);
             if (!Number.isFinite(minStep)) minStep = null;
             if (!Number.isFinite(maxStep)) maxStep = null;
+            if (!Number.isFinite(minLatency)) minLatency = null;
+            if (!Number.isFinite(maxLatency)) maxLatency = null;
 
             let recs = trajectoryRecords.slice();
             if (onlyValidation) recs = recs.filter(r => r.is_validation);
@@ -545,6 +558,8 @@
             if (onlyIncorrect && !onlyCorrect) recs = recs.filter(r => r?.reward_info?.is_correct === false);
             if (minStep !== null) recs = recs.filter(r => typeof r.step === 'number' ? r.step >= minStep : true);
             if (maxStep !== null) recs = recs.filter(r => typeof r.step === 'number' ? r.step <= maxStep : true);
+            if (minLatency !== null) recs = recs.filter(r => typeof r.latency_sec === 'number' && r.latency_sec >= minLatency);
+            if (maxLatency !== null) recs = recs.filter(r => typeof r.latency_sec === 'number' && r.latency_sec <= maxLatency);
 
             summary.style.display = 'block';
             summary.innerHTML = `<h3>Log Summary</h3>

@@ -411,7 +411,7 @@ async def generate_multi_metric_calc_case(tickers: List[str], metrics: List[Dict
                 {"ticker": ticker, "metric": combo["m1"], "period": period},
                 {"ticker": ticker, "metric": combo["m2"], "period": period},
             ],
-            "calc": {"operation": combo["operation"], "duration": None}
+            "calc": {"operation": combo["operation"]}
         }
         return {"input": prefix, "ground_truth": completion, "metadata": metadata}
     return None

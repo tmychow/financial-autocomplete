@@ -26,8 +26,8 @@ async def evaluate_completion_with_judge(
     """
     from openai import AsyncOpenAI
     
-    # Handle empty predictions
-    if not prediction and ground_truth != "NO_COMPLETION_NEEDED":
+    # Handle empty/missing predictions (always incorrect, including no-completion cases)
+    if not prediction:
         return False, "No prediction provided", 0.0
     
     try:
@@ -36,13 +36,11 @@ async def evaluate_completion_with_judge(
         if ground_truth == "NO_COMPLETION_NEEDED":
             prompt = f"""You are evaluating whether a model correctly identified that no completion was needed.
 
-The model's response: {prediction if prediction else "[empty/no response]"}
+The model's response: {prediction}
 
-The model should have either:
-1. Returned nothing/empty string
-2. Indicated that no completion is needed
+It is correct if the model explicitly returned the sentinel string: NO_COMPLETION_NEEDED. Do not accept empty, missing, or whitespace-only responses.
 
-Did the model correctly avoid providing a completion?
+Did the model correctly and explicitly return NO_COMPLETION_NEEDED?
 
 Please respond with your judgment in the following XML format:
 <judgment>
@@ -62,7 +60,7 @@ Please determine if the model's prediction is correct. Consider:
 - The model MUST return only the completion suffix, not repeat the input
 - Numeric values should be approximately equal (rounding is acceptable)
 - Formatting differences are fine e.g. missing $, using USD instead of $, B or billion or billions, and so on: "$1.2B" vs "1.2 USD_billions" vs "1200 million" should all be accepted
-- We care about the meaning, not the symbols or how natural the language is
+- We care about the meaning, not the symbols or how natural the language is e.g. having the words "count" or "ratio" after the number is fine
 - 0 does not mean no completion needed
 
 Please respond with your judgment in the following XML format:

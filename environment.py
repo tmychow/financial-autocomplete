@@ -104,15 +104,15 @@ class FinancialEnvironment:
         # Normalize inputs
         norm_ticker = await self._normalize_ticker(ticker)
         if not norm_ticker:
-            return f"Invalid ticker: {ticker}"
+            return "Invalid company"
 
         norm_metric = await self._normalize_metric(metric)
         if not norm_metric:
-            return f"Invalid metric: {metric}"
+            return "Invalid metric"
 
         norm_period = await self._normalize_period(period, norm_ticker, norm_metric)
         if not norm_period:
-            return f"Invalid period: {period}"
+            return "Invalid period"
 
         # Resolve 'latest' to concrete period if needed (normalize_period may already do this)
         if norm_period.lower() == "latest":
@@ -285,7 +285,6 @@ class FinancialEnvironment:
         num1: float,
         num2: float,
         operation: str,
-        duration: Optional[int] = None
     ) -> Optional[float]:
         """
         Perform a calculation
@@ -361,6 +360,46 @@ class EnvironmentError(Exception):
 
 import re
 
+# Shared tool signatures and matching patterns (single source of truth)
+TOOL_SIGNATURES = {
+    "search": ["metric", "ticker", "period"],
+    "calculate": ["num1", "num2", "operation"],
+    "return_answer": ["answer"],
+}
+
+# Pattern to find raw tool call occurrences in a string
+TOOL_CALL_REGEX = re.compile(r"\b(?:search|calculate|return_answer)\s*\(")
+
+def count_tool_calls(response: str) -> int:
+    """Return the number of raw tool-call occurrences in the assistant text."""
+    return len(re.findall(r"\b(?:search|calculate|return_answer)\s*\(", response or ""))
+
+def is_valid_single_tool_call_format(response: str) -> bool:
+    """
+    True if the response is exactly one tool call and nothing else (whitespace allowed).
+    """
+    if not response:
+        return False
+    if count_tool_calls(response) != 1:
+        return False
+    return bool(re.fullmatch(r"\s*(?:search|calculate|return_answer)\s*\([\s\S]*\)\s*", response))
+
+def analyze_tool_calls(response: str) -> Dict[str, Any]:
+    """
+    Analyze a response for tool calls.
+    Returns a dict with:
+      - count: number of tool call occurrences
+      - first: the first parsed tool call dict {"tool": str, "args": dict} or None
+    """
+    first_call = None
+    parsed = parse_tool_calls_from_response(response)
+    if parsed:
+        first_call = parsed[0]
+    return {
+        "count": count_tool_calls(response),
+        "first": first_call,
+    }
+
 def parse_tool_calls_from_response(response: str) -> List[Dict[str, Any]]:
     """
     Parse tool calls from LLM response text
@@ -381,12 +420,8 @@ def parse_tool_calls_from_response(response: str) -> List[Dict[str, Any]]:
             return re.fullmatch(r"\s*-?\d+(?:\.\d+)?\s*", value) is not None
         return False
     
-    # Define function signatures and their expected parameters
-    tool_signatures = {
-        "search": ["metric", "ticker", "period"],
-        "calculate": ["num1", "num2", "operation", "duration"],
-        "return_answer": ["answer"]
-    }
+    # Use shared function signatures
+    tool_signatures = TOOL_SIGNATURES
     
     # Find the first tool call in the response
     earliest_match = None
@@ -479,15 +514,7 @@ def parse_tool_calls_from_response(response: str) -> List[Dict[str, Any]]:
                     if "num2" in parsed_args:
                         val2 = parsed_args["num2"]
                         parsed_args["num2"] = float(val2) if _is_strict_number(val2) else None
-                    if "duration" in parsed_args:
-                        duration_val = parsed_args["duration"]
-                        if duration_val and str(duration_val).lower() != 'none':
-                            try:
-                                parsed_args["duration"] = int(duration_val)
-                            except ValueError:
-                                parsed_args["duration"] = None
-                        else:
-                            parsed_args["duration"] = None
+                    
                 
                 if parsed_args:
                     tool_calls.append({"tool": tool_name, "args": parsed_args})
@@ -527,7 +554,7 @@ if __name__ == "__main__":
         # Calculate
         result = await env.execute_tool(
             "calculate",
-            {"num1": 100, "num2": 80, "operation": "subtract", "duration": None}
+            {"num1": 100, "num2": 80, "operation": "subtract"}
         )
         print(f"100 - 80 = {result}")
         

@@ -6,7 +6,13 @@ Handles conversation management and interfaces with ART models
 from typing import List, Dict, Optional, Tuple, Any
 import asyncio
 import os
-from environment import FinancialEnvironment, parse_tool_calls_from_response
+from environment import (
+    FinancialEnvironment,
+    parse_tool_calls_from_response,
+    count_tool_calls,
+    is_valid_single_tool_call_format,
+    analyze_tool_calls,
+)
 
 SYSTEM_PROMPT = '''You are a financial data assistant. You will be given the start of a sentence in <input> tags, and you need to decide if continuing the sentence requires financial data.
 
@@ -81,7 +87,8 @@ class AutocompleteAgent:
     async def get_completion(
         self,
         text: str,
-        max_turns: int = 7
+        max_turns: int = 7,
+        max_tool_calls_per_turn: int = 1,
     ) -> Tuple[Optional[str], List[Dict[str, Any]], Dict[str, Any]]:
         """
         Get autocomplete for the given text using multi-turn tool interactions
@@ -101,9 +108,6 @@ class AutocompleteAgent:
             {"role": "user", "content": f"<input>{text}</input>"}
         ]
         
-        # Multi-turn conversation loop
-        import re as _re
-
         # Per-turn telemetry for rewards
         assistant_turn_lengths: List[int] = []
         assistant_turn_tool_calls_per_turn: List[int] = []
@@ -130,62 +134,46 @@ class AutocompleteAgent:
             # Telemetry: compute per-turn stats based on raw assistant text
             resp_len = len(response_text or "")
             assistant_turn_lengths.append(resp_len)
-            # Count raw tool-call occurrences in the turn (even if executor only runs the first)
-            tool_call_count = len(_re.findall(r"\b(?:search|calculate|return_answer)\s*\(", response_text or ""))
-            assistant_turn_tool_calls_per_turn.append(tool_call_count)
+
+            # Analyze tool calls (single source of truth for counts)
+            analysis = analyze_tool_calls(response_text or "")
+            tool_calls_count = analysis.get("count", 0)
+            first_tool_call = analysis.get("first")
+            assistant_turn_tool_calls_per_turn.append(tool_calls_count)
             # Valid format = exactly one tool call and nothing else
-            is_valid_format = bool(_re.fullmatch(r"\s*(?:search|calculate|return_answer)\s*\([\s\S]*\)\s*", response_text or "")) and tool_call_count == 1
+            is_valid_format = is_valid_single_tool_call_format(response_text or "")
             assistant_turn_valid_format.append(is_valid_format)
 
-            # Check if no completion needed
-            if "NO_COMPLETION_NEEDED" in response_text:
-                await self.environment.execute_tool("return_answer", {"answer": "NO_COMPLETION_NEEDED"})
-                break
-            
-            # Parse tool calls
-            tool_calls = parse_tool_calls_from_response(response_text)
-            
-            if not tool_calls:
-                # No tool calls found, prompt for tool usage
-                if turn == 0 and len(response_text.strip()) > 0:
-                    # First turn with no tools - treat as direct completion
-                    await self.environment.execute_tool("return_answer", {"answer": response_text.strip()})
-                    break
-                else:
-                    self.conversation.append({
-                        "role": "user",
-                        "content": "Please use the available tools to complete the task."
-                    })
-                    continue
-            
-            # Execute tool calls
-            tool_results = []
-            for tool_call in tool_calls:
-                result = await self.environment.execute_tool(
-                    tool_call["tool"],
-                    tool_call.get("args", {})
-                )
-                
-                # Check if this is the final answer
-                if tool_call["tool"] == "return_answer":
-                    break
-                
-                tool_results.append({
-                    "tool": tool_call["tool"],
-                    "args": tool_call.get("args", {}),
-                    "result": result
+            if tool_calls_count == 0 or not first_tool_call:
+                # No tool calls found: always prompt for tool usage (no direct completion fallback)
+                self.conversation.append({
+                    "role": "user",
+                    "content": "Please use the available tools to complete the task."
                 })
+                continue
+            if tool_calls_count > max_tool_calls_per_turn:
+                # Reject turns with too many tool calls
+                self.conversation.append({
+                    "role": "user",
+                    "content": f"Invalid: too many tool calls in one turn."
+                })
+                continue
+            
+            # Execute only the first tool call
+            result = await self.environment.execute_tool(
+                first_tool_call["tool"],
+                first_tool_call.get("args", {})
+            )
             
             # If we got a final answer, we're done
             if self.environment.is_complete():
                 break
             
-            # Add tool results to conversation for next turn
-            if tool_results:
-                tool_results_text = "Tool results:\n"
-                for tr in tool_results:
-                    tool_results_text += f"{tr['tool']}: {tr['result']}\n"
-                self.conversation.append({"role": "user", "content": tool_results_text})
+            # Add single tool result to conversation for next turn (trimmed format)
+            self.conversation.append({
+                "role": "user",
+                "content": f"{result}"
+            })
         
         # Prepare episode info
         episode_info = {
