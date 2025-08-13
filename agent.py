@@ -81,7 +81,7 @@ class AutocompleteAgent:
     async def get_completion(
         self,
         text: str,
-        max_turns: int = 10
+        max_turns: int = 7
     ) -> Tuple[Optional[str], List[Dict[str, Any]], Dict[str, Any]]:
         """
         Get autocomplete for the given text using multi-turn tool interactions

@@ -94,7 +94,7 @@ async def run_single_rollout(
     rollout_id: int,
     step: int,
     use_judge: bool = True,
-    max_turns: int = 10,
+    max_turns: int = 7,
     judge_model: Optional[str] = None,
 ) -> Dict[str, Any]:
     """

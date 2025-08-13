@@ -191,7 +191,7 @@ async def batch_evaluation(request: EvaluationRequest):
                 agent = AutocompleteAgent(model=model)
                 completion, tool_calls, episode_info = await agent.get_completion(
                     test_case["input"],
-                    max_turns=10
+                    max_turns=7
                 )
                 
                 # Calculate reward/correctness
