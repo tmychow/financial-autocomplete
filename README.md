@@ -72,9 +72,7 @@ Data use Tiingo’s exact field names across statements and daily endpoints (e.g
 
 ## TODO
 
-- [ ] Resume from checkpoint
-- [ ] Make sure we generate non-contaminated cases in validation
-- [ ] Making sure we aren't overfitting to the training data due to insufficient diversity
-- [ ] Deciding if our val set should be curriculum-based or not
-- [ ] Looking for any queries that are consistently wrong due to it being ambiguous
-- [ ] Deciding if we want a curriculum training at all
+- [ ] Track gradient norm and KL divergence each step; pause training if they explode
+- [ ] Keep more than the most recent checkpoint; ensure a checkpoint from last 5 steps is always retained
+- [ ] Convert to a model which can be used locally
+- [ ] Improve plots
