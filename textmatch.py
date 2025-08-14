@@ -4,7 +4,7 @@ Lightweight text matching utilities for tolerant normalization without hand-code
 - No external dependencies required; uses difflib.
 """
 
-from typing import Dict, Iterable, Tuple, Optional
+from typing import Dict, Iterable, Tuple, Optional, List
 import re
 import difflib
 
@@ -37,12 +37,21 @@ def normalize_text(text: str) -> str:
     return _normalize_spaces(s)
 
 
+STOPWORDS = {
+    "and", "&", "of", "to", "per", "the", "for", "in", "on", "by", "with",
+}
+
+def _tokenize_meaningful(text: str) -> List[str]:
+    """Tokenize a string into meaningful tokens: normalize, drop stopwords, singularize."""
+    raw_tokens = normalize_text(text).split()
+    filtered = [t for t in raw_tokens if t not in STOPWORDS]
+    norm_tokens = [t[:-1] if len(t) > 3 and t.endswith("s") else t for t in filtered]
+    return [t for t in norm_tokens if t]
+
 def token_signature(text: str) -> str:
-    """Create a token-set signature string for robust matching."""
-    tokens = normalize_text(text).split()
-    # naive singularization: remove trailing 's' for tokens > 3 chars
-    norm_tokens = [t[:-1] if len(t) > 3 and t.endswith("s") else t for t in tokens]
-    return " ".join(sorted(set(norm_tokens)))
+    """Create a token-set signature string for robust matching (stopwords removed)."""
+    tokens = _tokenize_meaningful(text)
+    return " ".join(sorted(set(tokens)))
 
 
 def build_ticker_alias_map(rows: Iterable[Dict[str, str]]) -> Dict[str, str]:
@@ -132,27 +141,49 @@ def build_metric_alias_map(metrics: Iterable[Dict[str, str]]) -> Dict[str, str]:
     return alias_to_code
 
 
-def best_key_match(query: str, keys: Iterable[str], cutoff: float = 0.90) -> Optional[str]:
-    """Return the best matching key using difflib ratio over token signatures.
+def _jaccard_similarity(a_tokens: List[str], b_tokens: List[str]) -> float:
+    if not a_tokens or not b_tokens:
+        return 0.0
+    a_set = set(a_tokens)
+    b_set = set(b_tokens)
+    inter = len(a_set & b_set)
+    union = len(a_set | b_set)
+    return inter / union if union else 0.0
 
-    cutoff is in [0,1]. We compute ratios on both raw-lowered and token signatures.
-    """
+def _combined_similarity(a: str, b: str) -> float:
+    """Combine multiple lightweight similarity signals into a single score in [0,1]."""
+    a_norm = (a or "").lower().strip()
+    b_norm = (b or "").lower().strip()
+    a_sig = token_signature(a)
+    b_sig = token_signature(b)
+    r_raw = difflib.SequenceMatcher(None, a_norm, b_norm).ratio()
+    r_sig = difflib.SequenceMatcher(None, a_sig, b_sig).ratio()
+    jacc = _jaccard_similarity(_tokenize_meaningful(a), _tokenize_meaningful(b))
+    return max(r_raw, r_sig, jacc)
+
+def best_key_match(query: str, keys: Iterable[str], cutoff: float = 0.90) -> Optional[str]:
+    """Return the best matching key using combined similarity (raw, signature, Jaccard)."""
     if not query:
         return None
-    query_norm = (query or "").lower().strip()
-    query_sig = token_signature(query)
     best_key = None
     best_score = 0.0
-    key_list = list(keys)
-    for k in key_list:
-        # compare both raw and signatures
-        r1 = difflib.SequenceMatcher(None, query_norm, k).ratio()
-        r2 = difflib.SequenceMatcher(None, query_sig, token_signature(k)).ratio()
-        score = max(r1, r2)
+    for k in list(keys):
+        score = _combined_similarity(query, k)
         if score > best_score:
             best_score = score
             best_key = k
     return best_key if best_score >= cutoff else None
+
+def top_key_matches(query: str, keys: Iterable[str], top_k: int = 3) -> List[Tuple[str, float]]:
+    """Return top-K matching keys with scores using combined similarity.
+
+    Results are sorted by score DESC then key ASC.
+    """
+    ranked: List[Tuple[str, float]] = []
+    for k in list(keys):
+        ranked.append((k, _combined_similarity(query, k)))
+    ranked.sort(key=lambda it: (-it[1], it[0]))
+    return ranked[: max(0, int(top_k))]
 
 
 def match_alias(query: str, alias_map: Dict[str, str], cutoff: float = 0.90) -> Optional[str]:

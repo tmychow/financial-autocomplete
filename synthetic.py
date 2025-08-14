@@ -5,8 +5,7 @@ Generates test cases from the financial database
 
 import asyncio
 import random
-import os
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Set
 from database import (
     get_all_metrics, get_available_periods, get_financial_value,
     get_db, get_tickers_with_data, get_latest_period
@@ -101,14 +100,45 @@ async def random_period(ticker: str, metric: str) -> Optional[str]:
     periods = await get_available_periods(ticker, metric)
     return random.choice(periods) if periods else None
 
+async def random_period_filtered(
+    ticker: str,
+    metric: str,
+    allowed_periods: Optional[Set[str]] = None,
+    excluded_periods: Optional[Set[str]] = None,
+) -> Optional[str]:
+    """Get a random period for ticker/metric after applying allow/exclude filters."""
+    periods = await get_available_periods(ticker, metric)
+    if not periods:
+        return None
+    filtered = []
+    for p in periods:
+        if allowed_periods is not None and p not in allowed_periods:
+            continue
+        if excluded_periods is not None and p in excluded_periods:
+            continue
+        filtered.append(p)
+    return random.choice(filtered) if filtered else None
+
 # ============== Test Case Generators ==============
 
-async def generate_latest_case(tickers: List[str], metrics: List[Dict[str, str]]):
+async def generate_latest_case(
+    tickers: List[str],
+    metrics: List[Dict[str, str]],
+    *,
+    allowed_periods: Optional[Set[str]] = None,
+    excluded_periods: Optional[Set[str]] = None,
+):
     """Generate a case explicitly using 'latest' keyword"""
     for _ in range(10):
         ticker = random.choice(tickers)
         metric = random.choice(metrics)
         
+        # If 'latest' is disallowed by constraints, skip
+        if allowed_periods is not None and "latest" not in allowed_periods:
+            continue
+        if excluded_periods is not None and "latest" in excluded_periods:
+            continue
+
         # Get the latest period for this ticker/metric
         latest_period = await get_latest_period(ticker, metric["metric_name"])
         if not latest_period:
@@ -148,7 +178,13 @@ async def generate_latest_case(tickers: List[str], metrics: List[Dict[str, str]]
         return {"input": prefix, "ground_truth": completion, "metadata": metadata}
     return None
 
-async def generate_simple_case(tickers: List[str], metrics: List[Dict[str, str]]):
+async def generate_simple_case(
+    tickers: List[str],
+    metrics: List[Dict[str, str]],
+    *,
+    allowed_periods: Optional[Set[str]] = None,
+    excluded_periods: Optional[Set[str]] = None,
+):
     """Generate a simple value lookup case"""
     for _ in range(10):
         ticker = random.choice(tickers)
@@ -166,22 +202,13 @@ async def generate_simple_case(tickers: List[str], metrics: List[Dict[str, str]]
             "{period} saw {company}'s {desc} at ",
         ]
         
-        # # Templates without period (should use latest period)
-        # templates_without_period = [
-        #     "{company} reported {desc} of ",
-        #     "{company}'s {desc} is ",
-        #     "The {desc} for {company} is ",
-        #     "{company} has {desc} of ",
-        #     "Currently, {company}'s {desc} is ",
-        #     "For {company}, {desc} is ",
-        #     "{company} shows {desc} of ",
-        # ]
-        
         # Randomly choose which type of template to use
         use_period_template = random.random() < 1.1  # 100% with period
         
         if use_period_template:
-            period = await random_period(ticker, metric["metric_name"])
+            period = await random_period_filtered(
+                ticker, metric["metric_name"], allowed_periods, excluded_periods
+            )
             if not period:
                 continue
             template = random.choice(templates_with_period)
@@ -190,16 +217,6 @@ async def generate_simple_case(tickers: List[str], metrics: List[Dict[str, str]]
                 desc=metric["description"].lower(),
                 period=period,
             )
-        # else:
-        #     # Use latest period for templates without period
-        #     period = await get_latest_period(ticker, metric["metric_name"])
-        #     if not period:
-        #         continue
-        #     template = random.choice(templates_without_period)
-        #     prefix = template.format(
-        #         company=await get_company_name(ticker),
-        #         desc=metric["description"].lower(),
-        #     )
         
         value = await get_financial_value(ticker, metric["metric_name"], period)
         if not value:
@@ -215,12 +232,25 @@ async def generate_simple_case(tickers: List[str], metrics: List[Dict[str, str]]
         return {"input": prefix, "ground_truth": completion, "metadata": metadata}
     return None
 
-async def generate_difference_case(tickers: List[str], metrics: List[Dict[str, str]]):
+async def generate_difference_case(
+    tickers: List[str],
+    metrics: List[Dict[str, str]],
+    *,
+    allowed_periods: Optional[Set[str]] = None,
+    excluded_periods: Optional[Set[str]] = None,
+):
     """Generate a case comparing values across periods"""
     for _ in range(10):
         ticker = random.choice(tickers)
         metric = random.choice(metrics)
         periods = await get_available_periods(ticker, metric["metric_name"])
+        if not periods:
+            continue
+        # Apply period filters
+        if allowed_periods is not None:
+            periods = [p for p in periods if p in allowed_periods]
+        if excluded_periods is not None:
+            periods = [p for p in periods if p not in excluded_periods]
         if len(periods) < 2:
             continue
         p1, p2 = sorted(random.sample(periods, 2))
@@ -257,7 +287,13 @@ async def generate_difference_case(tickers: List[str], metrics: List[Dict[str, s
         return {"input": prefix, "ground_truth": completion, "metadata": metadata}
     return None
 
-async def generate_cross_ticker_difference_case(tickers: List[str], metrics: List[Dict[str, str]]):
+async def generate_cross_ticker_difference_case(
+    tickers: List[str],
+    metrics: List[Dict[str, str]],
+    *,
+    allowed_periods: Optional[Set[str]] = None,
+    excluded_periods: Optional[Set[str]] = None,
+):
     """Generate case comparing two companies"""
     for _ in range(10):
         if len(tickers) < 2:
@@ -270,6 +306,11 @@ async def generate_cross_ticker_difference_case(tickers: List[str], metrics: Lis
         periods1 = await get_available_periods(t1, metric["metric_name"])
         
         for period in periods1:
+            # Apply period filters before retrieving values
+            if allowed_periods is not None and period not in allowed_periods:
+                continue
+            if excluded_periods is not None and period in excluded_periods:
+                continue
             v1 = await get_financial_value(t1, metric["metric_name"], period)
             v2 = await get_financial_value(t2, metric["metric_name"], period)
             if v1 and v2:
@@ -327,94 +368,7 @@ async def generate_cross_ticker_difference_case(tickers: List[str], metrics: Lis
         return {"input": prefix, "ground_truth": completion, "metadata": metadata}
     return None
 
-# Predefined calculation combinations (avoid duplicates of raw metrics)
-CALC_COMBOS = [
-    {
-        "m1": "opinc", "m2": "revenue",
-        "operation": "divide", "unit": "percentage",
-        "description": "operating margin"
-    },
-    {
-        "m1": "ebitda", "m2": "revenue",
-        "operation": "divide", "unit": "percentage",
-        "description": "EBITDA margin"
-    },
-    {
-        "m1": "freeCashFlow", "m2": "revenue",
-        "operation": "divide", "unit": "percentage",
-        "description": "free cash flow margin"
-    },
-    {
-        "m1": "capex", "m2": "revenue",
-        "operation": "divide", "unit": "percentage",
-        "description": "capex to revenue"
-    },
-    {
-        "m1": "debt", "m2": "ebitda",
-        "operation": "divide", "unit": "ratio",
-        "description": "debt to EBITDA"
-    },
-]
-
-async def generate_multi_metric_calc_case(tickers: List[str], metrics: List[Dict[str, str]]):
-    """Generate case requiring calculation between metrics"""
-    for _ in range(10):
-        ticker = random.choice(tickers)
-        combo = random.choice(CALC_COMBOS)
-        
-        # Get periods where BOTH metrics have data
-        periods_with_both = []
-        periods1 = await get_available_periods(ticker, combo["m1"])
-        
-        for period in periods1:
-            v1 = await get_financial_value(ticker, combo["m1"], period)
-            v2 = await get_financial_value(ticker, combo["m2"], period)
-            if v1 and v2:
-                periods_with_both.append((period, v1, v2))
-        
-        if not periods_with_both:
-            continue
-        
-        company = await get_company_name(ticker)
-        
-        # Decide whether to use specific period or latest
-        use_period_template = random.random() < 0.5
-        
-        if use_period_template:
-            period, v1, v2 = random.choice(periods_with_both)
-            prefix = f"The {combo['description']} for {company} in {period} was "
-        else:
-            # Use latest period (first in sorted list)
-            period, v1, v2 = periods_with_both[0]
-            prefix = f"The {combo['description']} for {company} is "
-        
-        if combo["operation"] == "divide":
-            if v2["value"] == 0:
-                continue
-            result = v1["value"] / v2["value"]
-            if combo["unit"] == "percentage":
-                # Check if values are already in percentage form
-                # If both values are in billions/regular numbers, convert to percentage
-                if v1.get("unit") != "percentage" and v2.get("unit") != "percentage":
-                    result *= 100
-        elif combo["operation"] == "subtract":
-            result = v1["value"] - v2["value"]
-        elif combo["operation"] == "add":
-            result = v1["value"] + v2["value"]
-        else:
-            continue
-        
-        completion = format_value(result, combo["unit"])
-        metadata = {
-            "type": "calc",
-            "required_lookups": [
-                {"ticker": ticker, "metric": combo["m1"], "period": period},
-                {"ticker": ticker, "metric": combo["m2"], "period": period},
-            ],
-            "calc": {"operation": combo["operation"]}
-        }
-        return {"input": prefix, "ground_truth": completion, "metadata": metadata}
-    return None
+# Multi-metric calc cases removed per simplified generator set
 
 # No-completion prefixes
 STATIC_NO_COMPLETION_PREFIXES = [
@@ -448,14 +402,27 @@ DYNAMIC_NO_COMPLETION_TEMPLATES = [
     "Looking back at {period}, discussion of {company}'s {desc} centered on ",
 ]
 
-async def generate_no_completion_case(tickers: List[str], metrics: List[Dict[str, str]]) -> Dict[str, str]:
+async def generate_no_completion_case(
+    tickers: List[str],
+    metrics: List[Dict[str, str]],
+    *,
+    allowed_periods: Optional[Set[str]] = None,
+    excluded_periods: Optional[Set[str]] = None,
+) -> Optional[Dict[str, str]]:
     """Generate case where no completion is needed"""
     if random.random() < 0.1:
         prefix = random.choice(STATIC_NO_COMPLETION_PREFIXES)
     else:
-        ticker = random.choice(tickers) if tickers else "AAPL"
-        metric = random.choice(metrics) if metrics else {"description": "revenue"}
-        period = await random_period(ticker, metric["metric_name"]) if metrics else "2023Q4"
+        # Dynamic no-completion requires valid ticker/metric and a valid period; no silent fallbacks
+        if not tickers or not metrics:
+            return None
+        ticker = random.choice(tickers)
+        metric = random.choice(metrics)
+        period = await random_period_filtered(
+            ticker, metric["metric_name"], allowed_periods, excluded_periods
+        )
+        if not period:
+            return None
         company = await get_company_name(ticker)
         template = random.choice(DYNAMIC_NO_COMPLETION_TEMPLATES)
         prefix = template.format(
@@ -472,6 +439,13 @@ async def generate_cases(
     num_cases: int,
     no_completion_ratio: float = 0.10,
     curriculum_stage: Optional[int] = None,
+    *,
+    allowed_tickers: Optional[Set[str]] = None,
+    excluded_tickers: Optional[Set[str]] = None,
+    allowed_metrics: Optional[Set[str]] = None,
+    excluded_metrics: Optional[Set[str]] = None,
+    allowed_periods: Optional[Set[str]] = None,
+    excluded_periods: Optional[Set[str]] = None,
 ) -> List[Dict[str, str]]:
     """
     Generate synthetic test cases
@@ -487,6 +461,22 @@ async def generate_cases(
         print("Warning: No tickers or metrics found in database")
         return []
     
+    # Apply allow/exclude filters for tickers
+    if allowed_tickers is not None:
+        tickers = [t for t in tickers if t in allowed_tickers]
+    if excluded_tickers is not None:
+        tickers = [t for t in tickers if t not in excluded_tickers]
+
+    # Apply allow/exclude filters for metrics (by metric_name)
+    if allowed_metrics is not None:
+        metrics = [m for m in metrics if m.get("metric_name") in allowed_metrics]
+    if excluded_metrics is not None:
+        metrics = [m for m in metrics if m.get("metric_name") not in excluded_metrics]
+
+    if not tickers or not metrics:
+        print("Warning: No tickers or metrics available after applying constraints")
+        return []
+
     cases = []
 
     # Generators in fixed order
@@ -495,21 +485,23 @@ async def generate_cases(
         generate_latest_case,
         generate_difference_case,
         generate_cross_ticker_difference_case,
-        generate_multi_metric_calc_case,
     ]
 
-    # Default distribution within completion cases
-    default_weights = [0.40, 0.15, 0.15, 0.15, 0.15]
+    # Default distribution within completion cases (length 4; calc case removed)
+    default_weights = [0.40, 0.20, 0.20, 0.20]
 
     # Curriculum schedule (stage-specific weights and no-completion ratios)
     # Stage 1: emphasize no-completion + simple/latest
     # Stage 2: introduce differences
     # Stage 3+: full mix
+    # Three-stage curriculum (length-4 weight vectors; calc case removed)
+    # Stage 1 (steps 0–59): [0.50, 0.30, 0.10, 0.10], no_completion 0.20
+    # Stage 2 (steps 60–99): [0.40, 0.30, 0.15, 0.15], no_completion 0.25
+    # Stage 3 (steps 100–139+): [0.40, 0.20, 0.20, 0.20], no_completion 0.25
     stage_to_weights = {
-        0: ([0.70, 0.30, 0.00, 0.00, 0.00], 0.00),
-        1: ([0.70, 0.30, 0.00, 0.00, 0.00], 0.10),
-        2: ([0.50, 0.20, 0.15, 0.15, 0.00], 0.10),
-        3: ([0.40, 0.15, 0.15, 0.15, 0.15], 0.10),
+        1: ([0.50, 0.30, 0.10, 0.10], 0.20),
+        2: ([0.40, 0.30, 0.15, 0.15], 0.25),
+        3: ([0.40, 0.20, 0.20, 0.20], 0.25),
     }
 
     # Select weights and no-completion ratio based on curriculum stage (if provided)
@@ -521,59 +513,92 @@ async def generate_cases(
     else:
         weights = default_weights
     
-    attempts = 0
-    max_attempts = num_cases * 10  # Prevent infinite loop
-    
-    while len(cases) < num_cases and attempts < max_attempts:
-        attempts += 1
-        
-        # Decide if this should be a no-completion case
-        if random.random() < no_completion_ratio:
-            case = await generate_no_completion_case(tickers, metrics)
-            cases.append(case)
-            continue
-        
-        # Choose a generator based on weights
-        # If all weights are zero (shouldn't happen), fall back to defaults
-        if sum(weights) <= 0:
-            weights = default_weights
-        gen = random.choices(generators, weights)[0]
-        case = await gen(tickers, metrics)
-        if case:
-            cases.append(case)
+    # Exact-proportion sampling: compute quotas
+    if num_cases <= 0:
+        return []
+
+    # No-completion quota (deterministic rounding)
+    no_count = int(round(no_completion_ratio * num_cases))
+    no_count = max(0, min(num_cases, no_count))
+    completion_count = num_cases - no_count
+
+    # Normalize weights if needed
+    if sum(weights) <= 0:
+        weights = default_weights
+    total_w = sum(weights)
+    weights_norm = [w / total_w for w in weights]
+
+    # Largest remainder method for per-generator quotas
+    raw_counts = [w * completion_count for w in weights_norm]
+    floor_counts = [int(x) for x in map(float, raw_counts)]
+    remainders = [rc - fc for rc, fc in zip(raw_counts, floor_counts)]
+    assigned = sum(floor_counts)
+    remaining = completion_count - assigned
+
+    # Assign remaining by largest remainders, stable by generator index
+    order = sorted(range(len(weights_norm)), key=lambda i: (-remainders[i], i))
+    counts = floor_counts[:]
+    for i in range(remaining):
+        counts[order[i]] += 1
+
+    # Helper to try generating a single case for a given generator index
+    async def _try_generate(gen_idx: int) -> Optional[Dict[str, str]]:
+        gen = generators[gen_idx]
+        return await gen(
+            tickers,
+            metrics,
+            allowed_periods=allowed_periods,
+            excluded_periods=excluded_periods,
+        )
+
+    # Fill no-completion quota
+    for _ in range(no_count):
+        case = await generate_no_completion_case(
+            tickers,
+            metrics,
+            allowed_periods=allowed_periods,
+            excluded_periods=excluded_periods,
+        )
+        cases.append(case)
+
+    # Fill generator quotas with retries and reallocation on failure
+    priority = list(range(len(generators)))  # fixed order
+    per_gen_attempt_cap = max(10, completion_count * 5)
+
+    for gen_idx, target in enumerate(counts):
+        made = 0
+        attempts = 0
+        while made < target and attempts < per_gen_attempt_cap:
+            attempts += 1
+            case = await _try_generate(gen_idx)
+            if case:
+                cases.append(case)
+                made += 1
+        # If unable to fill, reallocate leftover to next generators
+        leftover = target - made
+        if leftover > 0:
+            for alt_idx in priority:
+                if alt_idx == gen_idx:
+                    continue
+                alt_made = 0
+                alt_attempts = 0
+                alt_cap = max(5, leftover * 5)
+                while alt_made < leftover and alt_attempts < alt_cap:
+                    alt_attempts += 1
+                    alt_case = await _try_generate(alt_idx)
+                    if alt_case:
+                        cases.append(alt_case)
+                        alt_made += 1
+                leftover -= alt_made
+                if leftover <= 0:
+                    break
     
     if len(cases) < num_cases:
         print(f"Warning: Only generated {len(cases)} cases out of {num_cases} requested")
     
-    return cases
+    # If we exceeded due to fallback logic (should not), trim deterministically
+    return cases[:num_cases]
 
-# ============== Batch Generation for Training ==============
-
-async def generate_training_data(
-    num_train: int = 200,
-    num_eval: int = 50,
-    num_sample: int = 10
-) -> Dict[str, List[Dict[str, str]]]:
-    """
-    Generate train, eval, and sample datasets
-    
-    Returns:
-        Dictionary with 'train', 'eval', and 'sample' keys
-    """
-    print(f"Generating {num_train} training cases...")
-    train_cases = await generate_cases(num_train)
-    
-    print(f"Generating {num_eval} evaluation cases...")
-    eval_cases = await generate_cases(num_eval)
-    
-    print(f"Generating {num_sample} sample cases...")
-    sample_cases = await generate_cases(num_sample)
-    
-    return {
-        "train": train_cases,
-        "eval": eval_cases,
-        "sample": sample_cases
-    }
 
 if __name__ == "__main__":
     # Test synthetic data generation

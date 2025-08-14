@@ -30,10 +30,7 @@ cp .env.example .env
 
 ### Database Setup
 
-The database automatically loads financial data from Tiingo API on first run:
-- **30 companies**: Major tech (AAPL, MSFT, GOOGL, etc.) and emerging AI/energy stocks
-- **60+ metrics**: Income, balance sheet, cash flow, and market metrics
-- **Two data sources**: Statement data (quarterly/annual) and daily market data
+On first run, the database loads financial data from Tiingo statements and daily endpoints. It covers dozens of companies and a broad set of income, balance sheet, cash flow, and market metrics. Data are stored locally in `financial_data.db`.
 
 ### Test Server
 
@@ -44,41 +41,40 @@ python server.py
 ```
 
 Open http://localhost:8000 to:
-- View financial data in the database
-- Run model evaluations and see accuracy scores
+- Browse financial data in the database
+- Run quick model evaluations
+- View trajectories
 
 ### Training
 
-Open `finance_rl.ipynb` in Jupyter or Google Colab to train a model with RL.
+Open `finance_rl.ipynb` to run training. The notebook orchestrates:
+- Curriculum learning (three stages) with exact-proportion sampling per batch
+- Tool-based rollouts and LLM-as-judge rewards
+- Periodic validation against a benchmark model
 
-Reward signal: LLM-as-judge correctness plus tool-use bonuses:
-- Used `search`
-- Coverage of required lookups
-- Separate sub-scores for correct ticker, metric, period
+Reward combines judge correctness with tool-use/coverage signals (ticker/metric/period correctness, lookup coverage, used search).
+
+Validation uses a fixed holdout: a small, deterministic subset of tickers, metrics, and periods (plus “latest”), and a terminal task distribution. This avoids overfitting the validation set during training.
 
 ## Files
 
-- **`database.py`** - Database setup with Tiingo statements + daily data endpoints
-- **`synthetic.py`** - Generates test cases from database
-- **`environment.py`** - Financial tool execution (tools: `search`, `calculate`, `return_answer`)
-- **`agent.py`** - Multi-turn LLM agent
-- **`rewards.py`** - LLM-as-judge evaluation + tool-use and lookup-coverage bonuses
-- **`rollout.py`** - Training trajectory generation
-- **`server.py`** - FastAPI test server
-- **`index.html`** - Web interface
-  - Supports OpenAI models (`gpt-...`) and local Ollama models (`ollama:<model_name>`, e.g., `ollama:qwen2.5:3b-instruct`)
+- `database.py`: Tiingo loaders (statements + daily) and query utilities
+- `synthetic.py`: Synthetic case generation with curriculum-aware, exact-proportion sampling
+- `environment.py`: Tool execution (search, calculate, return_answer) with tolerant normalization and “did you mean” metric suggestions
+- `agent.py`: Multi-turn agent driving tool calls
+- `rewards.py`: Judge-based rewards + tool-use/coverage signals
+- `rollout.py`: Rollout execution and validation
+- `server.py` + `index.html`: Minimal web UI (OpenAI and local Ollama supported)
 
 ## Data Coverage
 
-The system fetches comprehensive financial data using exact Tiingo field names:
-- **Income Statement**: revenue, netinc, ebitda, eps, grossProfit, etc.
-- **Balance Sheet**: assets, cashAndEq, equity, debt, inventory, etc.
-- **Cash Flow**: freeCashFlow, ncfo, capex, payDiv, etc.
-- **Market Data**: marketCap, peRatio, pbRatio, trailingPEG1Y
-- **Calculated Metrics**: roe, roa, grossMargin, currentRatio, etc.
+Data use Tiingo’s exact field names across statements and daily endpoints (e.g., `netinc`, `ebitda`, `freeCashFlow`, `marketCap`).
 
 ## TODO
 
 - [ ] Resume from checkpoint
 - [ ] Make sure we generate non-contaminated cases in validation
 - [ ] Making sure we aren't overfitting to the training data due to insufficient diversity
+- [ ] Deciding if our val set should be curriculum-based or not
+- [ ] Looking for any queries that are consistently wrong due to it being ambiguous
+- [ ] Deciding if we want a curriculum training at all

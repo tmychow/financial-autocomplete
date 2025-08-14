@@ -1,40 +1,35 @@
 # Finance Autocomplete RL Training
 
 ## Purpose
-Train a small LLM to complete text with financial data using RL + tool calls.
+Train a small LLM to complete financial text using tool calls (search, calculate) and reinforcement learning on trajectories.
 
 ## Architecture
-1. **Database**: Real Tiingo data → SQLite at `/tmp/financial_data.db`
-   - Fetches from TWO Tiingo endpoints: `/statements` and `/daily`
-   - 30 companies × 60+ metrics × multiple periods
-   - Daily metrics aligned to statement periods (7-day lookback)
-2. **Episodes**: Text input → Agent calls tools → Environment returns results → Agent returns completion
-3. **Rewards**: LLM judge correctness score only (efficiency and completion penalties may be logged for analysis but do not affect training)
-4. **Training**: ART framework on trajectories
+1. **Database**: Tiingo statements + daily endpoints → SQLite (`financial_data.db`)
+   - Daily metrics are aligned to statement periods (7-day lookback)
+2. **Episodes**: Input prefix → Agent calls tools → Environment returns results → Agent returns completion
+3. **Rewards**: LLM-as-judge correctness + tool-use signals (used search, required lookup coverage, ticker/metric/period correctness)
+4. **Training**: ART trajectories with a three-stage curriculum and exact-proportion sampling
 
 ## Key Files
-- `database.py`: Tiingo data loading (statements + daily endpoints, exact field mapping)
-- `environment.py`: Executes tools (search, calculate, return_answer)
-- `agent.py`: Manages multi-turn tool calling conversations
-- `rewards.py`: LLM-as-judge + bonuses (used `search`, lookup coverage, per-dimension: ticker/metric/period)
-- `rollout.py`: Generates training trajectories
-- `server.py` + `index.html`: Test interface
-  - Supports OpenAI models (prefix `gpt-`) and local Ollama models (prefix `ollama:`)
+- `database.py`: Load/query Tiingo data (statements + daily)
+- `environment.py`: Execute tools; normalize inputs; provide "did you mean" metric suggestions
+- `agent.py`: Multi-turn tool-calling agent
+- `rewards.py`: Judge-based reward + tool-use and coverage signals
+- `rollout.py`: Training rollouts and validation
+- `server.py` + `index.html`: Minimal test UI (OpenAI + local Ollama)
 
-## Database Improvements (Dec 2024)
+## Data Coverage
 - Added daily data endpoint for marketCap, peRatio, pbRatio, trailingPEG1Y
 - Fixed metric mapping to use exact Tiingo dataCodes (netinc not netIncome)
 - Expanded from 5 to 30 companies (added TSLA, NVDA, etc.)
 - Added 40+ missing metrics from all statement types
 - Percentages multiplied by 100 for readability (0.46 → 46%)
 
-## Important
-- NO sample data - requires real Tiingo API or fails
-- Tool syntax: `search(metric="revenue", ticker="Apple", period="2023")` (flexible: company names, natural metric names, loose periods)
+## Notes
+- Real Tiingo data required; no mock dataset
+- Tool syntax: `search(metric="revenue", ticker="Apple", period="2023")`
+- Metric names map to Tiingo dataCodes (tolerant matching with suggestions)
 - Episode ends with `return_answer(answer="...")`
-- Metric names MUST match Tiingo's exact dataCodes
-- Episode ends with `return_answer(answer="...")`
-- Self-contained - now matches parent project's data coverage
 
 ## Testing
-Run `python server.py` → http://localhost:8000 to verify modules work.
+Run `python server.py` and open http://localhost:8000.

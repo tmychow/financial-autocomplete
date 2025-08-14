@@ -174,6 +174,20 @@ async def get_tickers_with_data() -> List[str]:
             return [row["ticker"] for row in rows]
 
 
+async def get_all_periods() -> List[str]:
+    """Return all distinct periods across the database, sorted from newest to oldest.
+
+    Uses the same parse_period ordering as latest-period resolution to ensure
+    FYs come after Q4 and proper chronological order.
+    """
+    async with get_db() as db:
+        async with db.execute("SELECT DISTINCT period FROM financial_data") as cursor:
+            rows = await cursor.fetchall()
+            periods = [row["period"] for row in rows]
+    # Sort using parse_period defined above
+    return sorted(periods, key=parse_period, reverse=True)
+
+
 # ============== Tiingo Data Loader (Optional) ==============
 
 class TiingoDataLoader:

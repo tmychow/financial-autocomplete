@@ -34,6 +34,7 @@ except ImportError:
 from agent import AutocompleteAgent
 from rewards import calculate_reward
 from synthetic import generate_cases
+from database import get_tickers_with_data, get_all_metrics, get_all_periods
 
 
 # ============== Logging Helpers ==============
@@ -280,8 +281,42 @@ async def run_validation(
     Returns:
         List of validation trajectories with win/loss rewards
     """
-    # Generate validation test cases
-    val_cases = await generate_cases(num_validation_cases)
+    # Build deterministic validation holdouts: 5 tickers, 5 metrics, 5 periods + "latest"
+    try:
+        all_tickers = await get_tickers_with_data()
+        allowed_tickers = set(sorted(all_tickers)[:5]) if all_tickers else set()
+    except Exception:
+        allowed_tickers = set()
+
+    try:
+        all_metrics = await get_all_metrics()
+        metric_names = sorted([m.get("metric_name") for m in all_metrics if m.get("metric_name")])
+        allowed_metrics = set(metric_names[:5]) if metric_names else set()
+    except Exception:
+        allowed_metrics = set()
+
+    try:
+        all_periods = await get_all_periods()
+        allowed_periods = set(all_periods[:5]) if all_periods else set()
+    except Exception:
+        allowed_periods = set()
+    # Always include "latest" as allowed for validation
+    allowed_periods.add("latest")
+
+    # Log chosen holdouts (console)
+    print("Validation holdouts:")
+    print(f"  Tickers: {sorted(list(allowed_tickers))}")
+    print(f"  Metrics: {sorted(list(allowed_metrics))}")
+    print(f"  Periods: {sorted(list(allowed_periods))}")
+
+    # Generate validation test cases using terminal distribution via curriculum_stage=3
+    val_cases = await generate_cases(
+        num_validation_cases,
+        curriculum_stage=3,
+        allowed_tickers=allowed_tickers if allowed_tickers else None,
+        allowed_metrics=allowed_metrics if allowed_metrics else None,
+        allowed_periods=allowed_periods if allowed_periods else None,
+    )
     
     validation_trajectories = []
     

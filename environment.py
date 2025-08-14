@@ -12,7 +12,8 @@ from database import (
 )
 from textmatch import (
     build_ticker_alias_map, build_metric_alias_map,
-    match_alias, clean_company_string
+    match_alias, clean_company_string,
+    top_key_matches
 )
 
 class ToolName(Enum):
@@ -108,6 +109,17 @@ class FinancialEnvironment:
 
         norm_metric = await self._normalize_metric(metric)
         if not norm_metric:
+            # Provide "did you mean" suggestions based on alias keys
+            suggestions = []
+            try:
+                await self._ensure_alias_maps()
+                alias_keys = list(self._metric_alias_map.keys()) if self._metric_alias_map else []
+                top = top_key_matches(metric or "", alias_keys, top_k=1)
+                suggestions = [k for k, score in top if k]
+            except Exception:
+                suggestions = []
+            if suggestions:
+                return f"Invalid metric. Did you mean: {', '.join(suggestions)}?"
             return "Invalid metric"
 
         norm_period = await self._normalize_period(period, norm_ticker, norm_metric)
