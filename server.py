@@ -116,6 +116,8 @@ async def batch_evaluation(request: EvaluationRequest):
     """
     # Generate test cases
     test_cases = await generate_cases(request.num_cases)
+    # Defensive filter: ensure valid structure
+    test_cases = [tc for tc in test_cases if isinstance(tc, dict) and "input" in tc and "ground_truth" in tc]
     
     if not test_cases:
         raise HTTPException(status_code=500, detail="Failed to generate test cases")
@@ -127,8 +129,8 @@ async def batch_evaluation(request: EvaluationRequest):
     for i, test_case in enumerate(test_cases):
         case_result = {
             "case_id": i,
-            "input": test_case["input"],
-            "ground_truth": test_case["ground_truth"],
+            "input": test_case.get("input"),
+            "ground_truth": test_case.get("ground_truth"),
             "model_results": {}
         }
         
@@ -190,14 +192,14 @@ async def batch_evaluation(request: EvaluationRequest):
                 # Create agent and get completion
                 agent = AutocompleteAgent(model=model)
                 completion, tool_calls, episode_info = await agent.get_completion(
-                    test_case["input"],
+                    test_case.get("input", ""),
                     max_turns=7
                 )
                 
                 # Calculate reward/correctness
                 reward_info = await calculate_reward(
                     completion,
-                    test_case["ground_truth"],
+                    test_case.get("ground_truth", ""),
                     episode_info,
                     tool_calls=tool_calls,
                     case_metadata=test_case.get("metadata"),

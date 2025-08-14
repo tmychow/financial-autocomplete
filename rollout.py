@@ -113,7 +113,18 @@ async def run_single_rollout(
         Dictionary containing trajectory and metadata
     """
     agent = AutocompleteAgent(model=model)
-    
+
+    # Validate test case structure early to avoid cascading errors
+    if not isinstance(test_case, dict) or "input" not in test_case or "ground_truth" not in test_case:
+        print(f"Error in rollout {rollout_id}: invalid test_case {test_case}")
+        return {
+            "trajectory": None,
+            "completion": None,
+            "ground_truth": test_case.get("ground_truth") if isinstance(test_case, dict) else None,
+            "error": "Invalid test_case: expected dict with 'input' and 'ground_truth'",
+            "success": False,
+        }
+
     try:
         # Get completion from agent
         start_time = time.time()
@@ -190,7 +201,7 @@ async def run_single_rollout(
         return {
             "trajectory": None,
             "completion": None,
-            "ground_truth": test_case["ground_truth"],
+            "ground_truth": test_case.get("ground_truth") if isinstance(test_case, dict) else None,
             "error": str(e),
             "success": False
         }

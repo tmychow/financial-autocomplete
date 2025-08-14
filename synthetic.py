@@ -551,15 +551,22 @@ async def generate_cases(
             excluded_periods=excluded_periods,
         )
 
-    # Fill no-completion quota
-    for _ in range(no_count):
+    # Fill no-completion quota (retry and only append valid cases)
+    made_no = 0
+    attempts_no = 0
+    # Cap attempts to avoid infinite loops if constraints are tight
+    no_attempt_cap = max(10, no_count * 5)
+    while made_no < no_count and attempts_no < no_attempt_cap:
+        attempts_no += 1
         case = await generate_no_completion_case(
             tickers,
             metrics,
             allowed_periods=allowed_periods,
             excluded_periods=excluded_periods,
         )
-        cases.append(case)
+        if case:
+            cases.append(case)
+            made_no += 1
 
     # Fill generator quotas with retries and reallocation on failure
     priority = list(range(len(generators)))  # fixed order
