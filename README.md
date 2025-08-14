@@ -72,7 +72,5 @@ Data use Tiingo’s exact field names across statements and daily endpoints (e.g
 
 ## TODO
 
-- [ ] Track gradient norm and KL divergence each step; pause training if they explode
-- [ ] Keep more than the most recent checkpoint; ensure a checkpoint from last 5 steps is always retained
 - [ ] Convert to a model which can be used locally
 - [ ] Improve plots
