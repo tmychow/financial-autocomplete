@@ -219,15 +219,20 @@ async def batch_evaluation(request: EvaluationRequest):
                     "reasoning": reward_info.get("reasoning", ""),
                     "used_search": reward_info.get("used_search", 0.0),
                     "lookup_coverage": reward_info.get("lookup_coverage", 0.0),
+                    "coverage_bonus": reward_info.get("coverage_bonus", 0.0),
                     "ticker_correct": reward_info.get("ticker_correct", 0.0),
                     "metric_correct": reward_info.get("metric_correct", 0.0),
                     "period_correct": reward_info.get("period_correct", 0.0),
+                    "exact_tuple_match": reward_info.get("exact_tuple_match", 0.0),
                     # Negative reward components
                     "total_penalty": reward_info.get("total_penalty", 0.0),
                     "char_penalty": reward_info.get("char_penalty", 0.0),
                     "toolcalls_per_turn_penalty": reward_info.get("toolcalls_per_turn_penalty", 0.0),
                     "turns_penalty": reward_info.get("turns_penalty", 0.0),
                     "format_penalty_applied": reward_info.get("format_penalty_applied", 0.0),
+                    "invalid_turns_count": reward_info.get("invalid_turns_count", 0),
+                    "searched_when_no_completion": reward_info.get("searched_when_no_completion", 0.0),
+                    "incorrect_abstain": reward_info.get("incorrect_abstain", 0.0),
                     # Telemetry (optional for UI)
                     "telemetry": reward_info.get("telemetry", {}),
                 }

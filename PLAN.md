@@ -1,0 +1,71 @@
+Let's make a few fixes
+
+- [ ] Redesign reward/penalty scheme to the new spec
+  - [ ] Positive rewards when completion is needed
+    - [ ] Use judge for correctness. If needs completion and is correct: +2.0
+      - Implementation status: already implemented via `rewards.py::evaluate_completion_with_judge` and consumed in `calculate_reward` as `correctness_score`/`is_correct`. Change needed: set weight `W_JUDGE=2.0` (since `correctness_score` is 1/0), no logic change.
+    - [ ] If any tool was used at any point: +0.2
+      - Implementation status: `used_search` already computed in `rewards.py::calculate_reward` by scanning `tool_calls`. Change needed: set weight `W_USED_SEARCH=0.2` (applies only when completion needed), no logic change.
+    - [ ] If any exact tuple (ticker, metric, period) from a `search` result matches any required tuple: +0.5
+      - Implementation status: `observed` and `required_tuples` already exist; we can re-use `matched` from existing coverage calc. Change needed: define `W_EXACT_TUPLE=0.5` and set `exact_tuple_match = 1.0 if matched > 0 else 0.0`.
+    - [ ] Individual components: `+0.1 * ticker_correct`, `+0.1 * metric_correct`, `+0.1 * period_correct`
+      - Implementation status: `ticker_correct`, `metric_correct`, `period_correct` already calculated in `rewards.py::calculate_reward`. Change needed: set `W_TICKER=0.1`, `W_METRIC=0.1`, `W_PERIOD=0.1`.
+  - [ ] Positive rewards when no completion is needed
+    - [ ] If correctly abstains (`NO_COMPLETION_NEEDED`): +2.0; no other positives apply
+      - Implementation status: judge already checks `NO_COMPLETION_NEEDED`. Change needed: weight-only: keep `correctness_score` as 1/0 and set `W_JUDGE=2.0` (no extra logic).
+  - [ ] Keep judge only as a correctness gate; retain current additive structure
+    - Implementation status: already a weighted linear combo. Change needed: weight-only updates (set the W_* values below), no logic change.
+  - [ ] Weights to set (env defaults)
+    - [ ] `W_JUDGE=2.0`, `W_USED_SEARCH=0.2`, `W_EXACT_TUPLE=0.5`, `W_TICKER=0.1`, `W_METRIC=0.1`, `W_PERIOD=0.1`, `W_COVERAGE=0.0`
+
+- [ ] Penalties (simple, non-redundant)
+  - [ ] Extra tool calls: -0.1 for each extra tool call beyond 1 per assistant turn
+    - Implementation status: `assistant_turn_tool_calls_per_turn` is provided by `agent.py` and per-turn excess is already computed. Change needed: set `K_TOOLCALLS_PER_TURN_SCALE=1.0` and `W_TOOLCALLS_PER_TURN_PENALTY=0.1`.
+  - [ ] Extra turns: -0.1 for each assistant turn beyond 1
+    - Implementation status: `turns` is already tracked with threshold. Change needed: set `TURNS_THRESHOLD=1`, `K_TURNS_SCALE=1.0`, `W_TURNS_PENALTY=0.1`.
+  - [ ] Extra characters: -0.001 per character above `CHAR_THRESHOLD` (sum over assistant turns)
+    - Implementation status: per-turn character overage is already computed. Change needed: set `K_CHAR_SCALE=1.0` and `W_CHAR_PENALTY=0.001`.
+  - [ ] Non-tool text: -0.3 per assistant turn that contains any non-tool text (not exactly one tool call)
+    - Implementation status: `assistant_turn_valid_format` already computed in `agent.py`. Change needed: compute `invalid_turns_count = sum(not v for v in assistant_turn_valid_format)` and set `W_FORMAT_PENALTY=0.3` (remove binary aggregation).
+  - [ ] Searched when no completion needed: if case is no-completion and any `search` call was made: -0.5
+    - Implementation status: `used_search` already computed. Change needed: when `is_no_completion` and `used_search==1.0`, subtract 0.5.
+  - [ ] Incorrect abstain: if completion is needed but prediction is `NO_COMPLETION_NEEDED`: -2.0
+    - Implementation status: `is_no_completion` and `prediction` are available; judge also returns `is_correct`. Change needed: if `not is_no_completion` and `prediction == 'NO_COMPLETION_NEEDED'`, subtract 2.0.
+  - [ ] Remove previous double-weighting (drop W_* x K_* combos); use fixed constants (env-overridable) for each penalty
+    - Implementation status: currently uses W_* and K_* environment variables. Change needed: set all K_* to 1.0 and tune via the W_* weights only.
+  - [ ] Weights to set (env defaults)
+    - [ ] `CHAR_THRESHOLD=125`
+    - [ ] `K_CHAR_SCALE=1.0`, `W_CHAR_PENALTY=0.001`
+    - [ ] `K_TOOLCALLS_PER_TURN_SCALE=1.0`, `W_TOOLCALLS_PER_TURN_PENALTY=0.1`
+    - [ ] `TURNS_THRESHOLD=1`, `K_TURNS_SCALE=1.0`, `W_TURNS_PENALTY=0.1`
+    - [ ] `W_FORMAT_PENALTY=0.3` (per invalid turn)
+    - [ ] `W_SEARCHED_WHEN_NO_COMPLETION=0.5`, `W_INCORRECT_ABSTAIN=2.0`
+
+- [ ] Implementation details
+  - [ ] `rewards.py::calculate_reward`
+    - [ ] Compute `is_no_completion` from metadata or ground truth
+    - [ ] Compute `used_search`, `observed` tuples, `lookup_coverage`, `ticker_correct`, `metric_correct`, `period_correct`
+      - Implementation status: already present; reuse as-is.
+    - [ ] Add `exact_tuple_match` boolean: true if any observed tuple matches any required tuple (treat `latest` as wildcard for period)
+      - Implementation status: `observed` and `required_tuples` already exist; only add a small check and a telemetry field.
+    - [ ] Build `positive_reward` per new rules; build `total_penalty` per new rules
+      - Implementation status: replace current weighted linear combo with fixed coefficients above; remove W_* in sums.
+    - [ ] Return new diagnostics: `exact_tuple_match`, `extra_tool_calls`, `extra_turns`, `extra_chars`, `non_tool_text_turns`, `searched_when_no_completion`, `incorrect_abstain`
+      - Implementation status: add fields to the returned dict in `rewards.py` and forward via `server.py`.
+  - [ ] Definitions
+    - [ ] Extra tool calls = sum over assistant turns of `max(0, tool_calls_in_turn - 1)`
+    - [ ] Extra turns = `assistant_turns - 1`
+    - [ ] Extra chars = sum over assistant turns of `max(0, len(turn_text) - CHAR_THRESHOLD)`
+    - [ ] Non-tool text turn = `assistant_turn_valid_format` is False
+  - [ ] Keep env vars for thresholds/defaults: `CHAR_THRESHOLD` (default 125). Expose new env overrides: `PENALTY_EXTRA_TOOLCALL=0.1`, `PENALTY_EXTRA_TURN=0.1`, `PENALTY_EXTRA_CHAR=0.001`, `PENALTY_NONTEXT_TURN=0.3`, `PENALTY_SEARCHED_WHEN_NO_COMPLETION=0.5`, `PENALTY_INCORRECT_ABSTAIN=2.0`
+
+- [ ] Server/UI wiring
+  - [ ] `server.py` batch evaluation: include new breakdown fields from reward dict in response JSON
+  - [ ] (Optional) Update UI labels in `index.html` to show the new breakdown
+
+- [ ] Tests/validation
+  - [ ] Unit-like checks in `__main__` of `rewards.py` for: correct completion, incorrect completion, correct abstain, incorrect abstain, search during no-completion
+  - [ ] Quick rollout smoke test to verify metrics populate and no crashes
+
+- [ ] Docs
+  - [ ] Update `README.md` to document the new reward/penalty scheme and env vars

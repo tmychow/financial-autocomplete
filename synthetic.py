@@ -499,9 +499,9 @@ async def generate_cases(
     # Stage 2 (steps 60–99): [0.40, 0.30, 0.15, 0.15], no_completion 0.25
     # Stage 3 (steps 100–139+): [0.40, 0.20, 0.20, 0.20], no_completion 0.25
     stage_to_weights = {
-        1: ([0.50, 0.30, 0.10, 0.10], 0.20),
-        2: ([0.40, 0.30, 0.15, 0.15], 0.25),
-        3: ([0.40, 0.20, 0.20, 0.20], 0.25),
+        1: ([0.70, 0.30, 0.00, 0.00], 0.20),
+        2: ([0.70, 0.30, 0.00, 0.00], 0.25),
+        3: ([0.60, 0.40, 0.00, 0.00], 0.25),
     }
 
     # Select weights and no-completion ratio based on curriculum stage (if provided)

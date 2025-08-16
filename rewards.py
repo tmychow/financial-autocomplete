@@ -133,29 +133,33 @@ async def calculate_reward(
         reasoning = "Simple string match evaluation"
     
     # Additional reward components
-    # Weights (configurable via env)
-    W_JUDGE = float(os.getenv("W_JUDGE", "1.0"))
-    W_USED_SEARCH = float(os.getenv("W_USED_SEARCH", "0.1"))
-    # Keep combined coverage available but default to 0 (replaced by separate components)
-    W_COVERAGE = float(os.getenv("W_COVERAGE", "0.0"))
-    # New separate components
-    W_TICKER = float(os.getenv("W_TICKER", "0.0667"))
-    W_METRIC = float(os.getenv("W_METRIC", "0.0667"))
-    W_PERIOD = float(os.getenv("W_PERIOD", "0.0666"))
+    # Weights (configurable via env) — weight-only changes per PLAN.md
+    W_JUDGE = float(os.getenv("W_JUDGE", "2.0"))
+    W_USED_SEARCH = float(os.getenv("W_USED_SEARCH", "0.2"))
+    # Coverage term: reuse for exact-tuple bonus (binary any-match)
+    W_COVERAGE = float(os.getenv("W_COVERAGE", "0.5"))
+    # Separate components
+    W_TICKER = float(os.getenv("W_TICKER", "0.1"))
+    W_METRIC = float(os.getenv("W_METRIC", "0.1"))
+    W_PERIOD = float(os.getenv("W_PERIOD", "0.1"))
 
     # Determine if this is a no-completion case
     case_type = (case_metadata or {}).get("type") if isinstance(case_metadata, dict) else None
     is_no_completion = case_type == "no_completion" or ground_truth == "NO_COMPLETION_NEEDED"
 
-    # Used search flag
+    # Used search flag (compute regardless of case for penalties)
     used_search = 0.0
     lookup_coverage = 0.0
     ticker_correct = 0.0
     metric_correct = 0.0
     period_correct = 0.0
 
-    if tool_calls and not is_no_completion:
+    matched = 0  # used for exact_tuple_match
+    total_required_lookups = 0  # total required lookup tuples for this case
+    if tool_calls:
         used_search = 1.0 if any(tc.get("tool") == "search" for tc in tool_calls) else 0.0
+    
+    if tool_calls and not is_no_completion:
         # Build observed lookups from results
         observed = set()
         for tc in tool_calls:
@@ -184,8 +188,8 @@ async def calculate_reward(
                     required_tuples.append((tk, mt, "*latest*"))
                 else:
                     required_tuples.append((tk, mt, pr))
-        matched = 0
         total = len(required_tuples)
+        total_required_lookups = total
         if total > 0:
             for r in required_tuples:
                 if r[2] == "*latest*":
@@ -219,24 +223,28 @@ async def calculate_reward(
             metric_correct = metric_hits / total
             period_correct = period_hits / total
 
-    # ========= New negative rewards (penalties) =========
-    # Configurable weights and scales via env vars
+    # ========= Negative rewards (penalties) =========
+    # Configurable weights and scales via env vars (use W_* only; set K_* = 1.0)
     # Character-length penalty
     CHAR_THRESHOLD = int(os.getenv("CHAR_THRESHOLD", "125"))
-    W_CHAR_PENALTY = float(os.getenv("W_CHAR_PENALTY", "0.5"))
-    K_CHAR_SCALE = float(os.getenv("K_CHAR_SCALE", "0.01"))  # per excess character
+    W_CHAR_PENALTY = float(os.getenv("W_CHAR_PENALTY", "0.001"))
+    K_CHAR_SCALE = float(os.getenv("K_CHAR_SCALE", "1.0"))  # per excess character
 
     # Tool-calls-per-turn penalty (excess over 1 per assistant turn)
-    W_TOOLCALLS_PER_TURN_PENALTY = float(os.getenv("W_TOOLCALLS_PER_TURN_PENALTY", "0.5"))
-    K_TOOLCALLS_PER_TURN_SCALE = float(os.getenv("K_TOOLCALLS_PER_TURN_SCALE", "0.5"))
+    W_TOOLCALLS_PER_TURN_PENALTY = float(os.getenv("W_TOOLCALLS_PER_TURN_PENALTY", "0.1"))
+    K_TOOLCALLS_PER_TURN_SCALE = float(os.getenv("K_TOOLCALLS_PER_TURN_SCALE", "1.0"))
 
     # Turns penalty (excess over threshold total turns)
-    TURNS_THRESHOLD = int(os.getenv("TURNS_THRESHOLD", "5"))
-    W_TURNS_PENALTY = float(os.getenv("W_TURNS_PENALTY", "0.2"))
-    K_TURNS_SCALE = float(os.getenv("K_TURNS_SCALE", "1"))
+    TURNS_THRESHOLD = int(os.getenv("TURNS_THRESHOLD", "1"))
+    W_TURNS_PENALTY = float(os.getenv("W_TURNS_PENALTY", "0.1"))
+    K_TURNS_SCALE = float(os.getenv("K_TURNS_SCALE", "1.0"))
 
-    # Invalid-format (non-DSL) penalty as binary switch
+    # Non-tool text penalty (per invalid assistant turn)
     W_FORMAT_PENALTY = float(os.getenv("W_FORMAT_PENALTY", "0.3"))
+
+    # Scenario penalties
+    W_SEARCHED_WHEN_NO_COMPLETION = float(os.getenv("W_SEARCHED_WHEN_NO_COMPLETION", "0.5"))
+    W_INCORRECT_ABSTAIN = float(os.getenv("W_INCORRECT_ABSTAIN", "2.0"))
 
     # Safely extract telemetry
     turn_lengths: List[int] = episode_info.get("assistant_turn_lengths", []) or []
@@ -270,15 +278,24 @@ async def calculate_reward(
     turns_excess = max(0, total_turns - TURNS_THRESHOLD)
     turns_penalty = K_TURNS_SCALE * turns_excess
 
-    # 4) Invalid format (binary): any assistant turn not fully inside a single tool call
-    any_invalid_format = any(v is False for v in valid_format_flags) if valid_format_flags else False
-    format_penalty = 1.0 if any_invalid_format else 0.0
+    # 4) Invalid format: per assistant turn not fully inside a single tool call
+    invalid_turns_count = 0
+    if valid_format_flags:
+        invalid_turns_count = sum(1 for v in valid_format_flags if not v)
+    any_invalid_format = invalid_turns_count > 0
+    format_penalty = invalid_turns_count
 
-    # Positive components (existing)
+    # 5) Scenario penalties
+    searched_when_no_completion = 1.0 if (is_no_completion and used_search == 1.0) else 0.0
+    incorrect_abstain = 1.0 if ((not is_no_completion) and (prediction == "NO_COMPLETION_NEEDED")) else 0.0
+
+    # Positive components (weights only)
+    # Reuse coverage as a binary any-match bonus: coverage_bonus = 1.0 if matched > 0 else 0.0
+    coverage_bonus = 1.0 if (not is_no_completion and matched > 0) else 0.0
     positive_reward = (
         W_JUDGE * correctness_score
         + (0.0 if is_no_completion else W_USED_SEARCH * used_search)
-        + (0.0 if is_no_completion else W_COVERAGE * lookup_coverage)
+        + (0.0 if is_no_completion else W_COVERAGE * coverage_bonus)
         + (0.0 if is_no_completion else W_TICKER * ticker_correct)
         + (0.0 if is_no_completion else W_METRIC * metric_correct)
         + (0.0 if is_no_completion else W_PERIOD * period_correct)
@@ -290,6 +307,8 @@ async def calculate_reward(
         + W_TOOLCALLS_PER_TURN_PENALTY * toolcalls_per_turn_penalty
         + W_TURNS_PENALTY * turns_penalty
         + W_FORMAT_PENALTY * format_penalty
+        + W_SEARCHED_WHEN_NO_COMPLETION * searched_when_no_completion
+        + W_INCORRECT_ABSTAIN * incorrect_abstain
     )
 
     total_reward = positive_reward - total_penalty
@@ -305,6 +324,11 @@ async def calculate_reward(
         "reasoning": reasoning,
         "used_search": used_search,
         "lookup_coverage": lookup_coverage,
+        # Required lookup tuple diagnostics
+        "required_lookup_total": total_required_lookups,
+        "required_lookup_matched": matched,
+        "any_required_lookup_observed": 1.0 if (not is_no_completion and matched > 0) else 0.0,
+        "all_required_lookups_observed": 1.0 if (not is_no_completion and total_required_lookups > 0 and matched == total_required_lookups) else 0.0,
         "ticker_correct": ticker_correct,
         "metric_correct": metric_correct,
         "period_correct": period_correct,
@@ -313,6 +337,10 @@ async def calculate_reward(
         "toolcalls_per_turn_penalty": toolcalls_per_turn_penalty,
         "turns_penalty": turns_penalty,
         "format_penalty_applied": 1.0 if any_invalid_format else 0.0,
+        "invalid_turns_count": invalid_turns_count,
+        "searched_when_no_completion": searched_when_no_completion,
+        "incorrect_abstain": incorrect_abstain,
+        "coverage_bonus": coverage_bonus,
         "total_penalty": total_penalty,
         "telemetry": {
             "assistant_turn_lengths": turn_lengths,

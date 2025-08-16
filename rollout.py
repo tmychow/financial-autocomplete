@@ -150,6 +150,13 @@ async def run_single_rollout(
         conversation = agent.get_conversation()
         
         # Create metrics dictionary
+        # Case categorization: requires answer vs no-completion
+        meta = test_case.get("metadata") if isinstance(test_case, dict) else None
+        is_no_completion_case = (
+            (test_case.get("ground_truth") == "NO_COMPLETION_NEEDED")
+            or (isinstance(meta, dict) and meta.get("type") == "no_completion")
+        )
+
         metrics = {
             "reward": reward_info["total_reward"],
             "correctness": reward_info["correctness_score"],
@@ -157,11 +164,27 @@ async def run_single_rollout(
             "num_tool_calls": episode_info["tool_calls_count"],
             "num_turns": episode_info["turns"],
             "completed": 1.0 if episode_info["completed"] else 0.0,
+            # Legacy alias for dashboards expecting 'completion'
+            "completion": 1.0 if episode_info["completed"] else 0.0,
             "latency": latency,
             "step": step,
             "rollout_id": rollout_id,
             "used_search": reward_info.get("used_search", 0.0),
+            # Legacy alias for dashboards expecting 'use_search'
+            "use_search": reward_info.get("used_search", 0.0),
             "lookup_coverage": reward_info.get("lookup_coverage", 0.0),
+            "coverage_bonus": reward_info.get("coverage_bonus", 0.0),
+            # Tuple usage diagnostics for downstream fraction metrics
+            "used_right_tuple_any": reward_info.get("any_required_lookup_observed", 0.0),
+            "used_right_tuple_all": reward_info.get("all_required_lookups_observed", 0.0),
+            "required_lookup_total": float(reward_info.get("required_lookup_total", 0)),
+            "required_lookup_matched": float(reward_info.get("required_lookup_matched", 0)),
+            # Additional training metrics hooks
+            "requires_answer": 0.0 if is_no_completion_case else 1.0,
+            "is_no_completion": 1.0 if is_no_completion_case else 0.0,
+            "incorrect_abstain": reward_info.get("incorrect_abstain", 0.0),
+            "answered": 1.0 if episode_info.get("completed") else 0.0,
+            "did_not_answer": 0.0 if episode_info.get("completed") else 1.0,
         }
         
         # Create ART trajectory
@@ -374,87 +397,6 @@ async def run_validation(
             validation_trajectories.append(val_trajectory)
     
     return validation_trajectories
-
-# ============== Batch Processing ==============
-
-async def generate_training_trajectories(
-    model: Any,
-    num_cases: int = 10,
-    num_rollouts_per_case: int = 5,
-    step: int = 0,
-    use_judge: bool = True,
-    judge_model: Optional[str] = None,
-) -> Tuple[List[art.TrajectoryGroup], Dict[str, float]]:
-    """
-    Generate training trajectories for a training step
-    
-    Args:
-        model: ART model to train
-        num_cases: Number of unique test cases
-        num_rollouts_per_case: Rollouts per test case
-        step: Training step number
-        use_judge: Whether to use LLM judge
-        
-    Returns:
-        Tuple of (trajectory_groups, metrics_dict)
-    """
-    # Determine curriculum stage from step
-    # Stages: 1 for early, 2 for mid, 3 for late/default
-    if step < 40:
-        curriculum_stage = 1
-    elif step < 80:
-        curriculum_stage = 2
-    else:
-        curriculum_stage = 3
-
-    # Allow override via environment variable CURRICULUM_STAGE
-    import os
-    env_stage = os.getenv("CURRICULUM_STAGE")
-    if env_stage is not None:
-        try:
-            curriculum_stage = int(env_stage)
-        except ValueError:
-            pass
-
-    # Generate test cases with curriculum
-    test_cases = await generate_cases(num_cases, curriculum_stage=curriculum_stage)
-    
-    # Conduct rollouts
-    trajectory_groups = await conduct_rollouts(
-        model=model,
-        test_cases=test_cases,
-        num_rollouts_per_case=num_rollouts_per_case,
-        step=step,
-        use_judge=use_judge,
-        judge_model=judge_model,
-    )
-    
-    # Calculate metrics
-    total_trajectories = sum(len(tg.trajectories) for tg in trajectory_groups)
-    avg_reward = 0.0
-    avg_correctness = 0.0
-    avg_tool_calls = 0.0
-    
-    if total_trajectories > 0:
-        for tg in trajectory_groups:
-            for traj in tg.trajectories:
-                avg_reward += traj.metrics.get("reward", 0.0)
-                avg_correctness += traj.metrics.get("correctness", 0.0)
-                avg_tool_calls += traj.metrics.get("num_tool_calls", 0.0)
-        
-        avg_reward /= total_trajectories
-        avg_correctness /= total_trajectories
-        avg_tool_calls /= total_trajectories
-    
-    metrics = {
-        "total_trajectories": total_trajectories,
-        "avg_reward": avg_reward,
-        "avg_correctness": avg_correctness,
-        "avg_tool_calls": avg_tool_calls,
-        "num_groups": len(trajectory_groups)
-    }
-    
-    return trajectory_groups, metrics
 
 # ============== Testing ==============
 
