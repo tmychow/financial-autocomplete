@@ -76,6 +76,9 @@ yarn-error.log*
 # Reports
 *.json
 
+# Plots
+*.png
+
 # Jupyter Notebook
 .ipynb_checkpoints/
 */.ipynb_checkpoints/*

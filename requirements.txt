@@ -22,3 +22,7 @@ ollama
 
 # Environment variable loading
 python-dotenv>=0.19.0
+
+# Plotting for correctness scripts
+pandas>=2.0.0
+matplotlib>=3.7.0
