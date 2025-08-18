@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Optional
 from contextlib import asynccontextmanager
 import asyncio
 import os
+import time
 
 # Load environment variables from .env file
 from dotenv import load_dotenv
@@ -54,6 +55,9 @@ class EvaluationRequest(BaseModel):
     models: List[str] = ["gpt-4.1-mini"]
     num_cases: int = 10
     use_judge: bool = True
+    # Optional: control prompt phrasing used by synthetic case generator
+    # Values: None/"default" for training-style prompts, "validation" for alt phrasing
+    templates_mode: Optional[str] = None
 
 class EvaluationResponse(BaseModel):
     results: List[Dict[str, Any]]
@@ -115,7 +119,10 @@ async def batch_evaluation(request: EvaluationRequest):
     Run batch evaluation on specified models
     """
     # Generate test cases
-    test_cases = await generate_cases(request.num_cases)
+    test_cases = await generate_cases(
+        request.num_cases,
+        templates_mode=(request.templates_mode or None)
+    )
     # Defensive filter: ensure valid structure
     test_cases = [tc for tc in test_cases if isinstance(tc, dict) and "input" in tc and "ground_truth" in tc]
     
@@ -191,10 +198,12 @@ async def batch_evaluation(request: EvaluationRequest):
                 
                 # Create agent and get completion
                 agent = AutocompleteAgent(model=model)
+                inference_start = time.perf_counter()
                 completion, tool_calls, episode_info = await agent.get_completion(
                     test_case.get("input", ""),
                     max_turns=7
                 )
+                inference_end = time.perf_counter()
                 
                 # Calculate reward/correctness
                 reward_info = await calculate_reward(
@@ -235,6 +244,8 @@ async def batch_evaluation(request: EvaluationRequest):
                     "incorrect_abstain": reward_info.get("incorrect_abstain", 0.0),
                     # Telemetry (optional for UI)
                     "telemetry": reward_info.get("telemetry", {}),
+                    # Latency metrics (seconds)
+                    "latency_sec": (inference_end - inference_start),
                 }
                 
                 if reward_info["is_correct"]:

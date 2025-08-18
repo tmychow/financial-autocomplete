@@ -8,7 +8,7 @@ Train a small LLM to complete financial text using tool calls (search, calculate
    - Daily metrics are aligned to statement periods (7-day lookback)
 2. **Episodes**: Input prefix → Agent calls tools → Environment returns results → Agent returns completion
 3. **Rewards**: LLM-as-judge correctness + tool-use signals (used search, required lookup coverage, ticker/metric/period correctness)
-4. **Training**: ART trajectories with a three-stage curriculum and exact-proportion sampling
+4. **Training**: ART trajectories with exact-proportion sampling
 
 ## Key Files
 - `database.py`: Load/query Tiingo data (statements + daily)

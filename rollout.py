@@ -78,6 +78,7 @@ def _make_rollout_log_record(
         "is_validation": is_validation,
         "input": test_case.get("input"),
         "ground_truth": test_case.get("ground_truth"),
+        "case_metadata": test_case.get("metadata"),
         "prediction": completion,
         "conversation": conversation,
         "tool_calls": tool_calls,
@@ -185,6 +186,9 @@ async def run_single_rollout(
             "incorrect_abstain": reward_info.get("incorrect_abstain", 0.0),
             "answered": 1.0 if episode_info.get("completed") else 0.0,
             "did_not_answer": 0.0 if episode_info.get("completed") else 1.0,
+            # Prompt variant signals for analysis
+            "case_type": (meta.get("type") if isinstance(meta, dict) else None) or ("no_completion" if is_no_completion_case else "completion"),
+            "prompt_variant": (meta.get("prompt_variant") if isinstance(meta, dict) else None) or "default",
         }
         
         # Create ART trajectory
@@ -301,6 +305,7 @@ async def run_validation(
     use_judge: bool = True,
     judge_model: Optional[str] = None,
     log_path: Optional[str] = None,
+    templates_mode: Optional[str] = "validation",
 ) -> List[art.Trajectory]:
     """
     Run validation against a benchmark model
@@ -350,6 +355,7 @@ async def run_validation(
         allowed_tickers=allowed_tickers if allowed_tickers else None,
         allowed_metrics=allowed_metrics if allowed_metrics else None,
         allowed_periods=allowed_periods if allowed_periods else None,
+        templates_mode=templates_mode,
     )
     
     validation_trajectories = []

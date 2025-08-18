@@ -127,6 +127,7 @@ async def generate_latest_case(
     *,
     allowed_periods: Optional[Set[str]] = None,
     excluded_periods: Optional[Set[str]] = None,
+    templates_mode: Optional[str] = None,
 ):
     """Generate a case explicitly using 'latest' keyword"""
     for _ in range(10):
@@ -151,7 +152,7 @@ async def generate_latest_case(
         company = await get_company_name(ticker)
         
         # Templates that explicitly use "latest" (expanded for diversity)
-        templates = [
+        templates_default = [
             "{company}'s latest {desc} is ",
             "The latest {desc} for {company} is ",
             "{company} latest reported {desc} of ",
@@ -163,6 +164,18 @@ async def generate_latest_case(
             "For the latest period, {company}'s {desc} was ",
             "In the most recent filing, {company}'s {desc} was ",
         ]
+        # Validation-only alternative phrasing to test prompt robustness
+        templates_validation = [
+            "As of the most recent period, {company} reports {desc} of ",
+            "Most recently, {company}'s {desc} came in at ",
+            "For the most up-to-date reporting period, {company}'s {desc} was ",
+            "In the latest available period, {company}'s {desc} stood at ",
+            "According to the latest filing, {company}'s {desc} is ",
+            "On the most recent report, {company} disclosed {desc} of ",
+            "Looking at the latest data point, {company}'s {desc} is ",
+            "The most current {desc} for {company} amounts to ",
+        ]
+        templates = templates_validation if templates_mode == "validation" else templates_default
         
         prefix = random.choice(templates).format(
             company=company,
@@ -173,7 +186,8 @@ async def generate_latest_case(
             "type": "latest",
             "required_lookups": [
                 {"ticker": ticker, "metric": metric["metric_name"], "period": "latest"}
-            ]
+            ],
+            "prompt_variant": (templates_mode or "default"),
         }
         return {"input": prefix, "ground_truth": completion, "metadata": metadata}
     return None
@@ -184,6 +198,7 @@ async def generate_simple_case(
     *,
     allowed_periods: Optional[Set[str]] = None,
     excluded_periods: Optional[Set[str]] = None,
+    templates_mode: Optional[str] = None,
 ):
     """Generate a simple value lookup case"""
     for _ in range(10):
@@ -191,7 +206,7 @@ async def generate_simple_case(
         metric = random.choice(metrics)
         
         # Templates with explicit period placeholders (use random period)
-        templates_with_period = [
+        templates_with_period_default = [
             "{company}'s {desc} in {period} was ",
             "The {desc} for {company} in {period} was ",
             "In {period}, {company}'s {desc} was ",
@@ -201,6 +216,20 @@ async def generate_simple_case(
             "For the period {period}, {company}'s {desc} was ",
             "{period} saw {company}'s {desc} at ",
         ]
+        # Validation-only alternative phrasing to test prompt robustness
+        templates_with_period_validation = [
+            "In {period}, {company} recorded {desc} of ",
+            "For {period}, the {desc} at {company} amounted to ",
+            "During {period}, {company} posted {desc} of ",
+            "As reported for {period}, {company}'s {desc} was ",
+            "Looking back to {period}, {company}'s {desc} came to ",
+            "For the {period} period, {company} reported {desc} of ",
+            "At {period}, {company} showed {desc} of ",
+            "According to {period} results, {company}'s {desc} stood at ",
+        ]
+        templates_with_period = (
+            templates_with_period_validation if templates_mode == "validation" else templates_with_period_default
+        )
         
         # Randomly choose which type of template to use
         use_period_template = random.random() < 1.1  # 100% with period
@@ -227,7 +256,8 @@ async def generate_simple_case(
             "type": "simple",
             "required_lookups": [
                 {"ticker": ticker, "metric": metric["metric_name"], "period": period}
-            ]
+            ],
+            "prompt_variant": (templates_mode or "default"),
         }
         return {"input": prefix, "ground_truth": completion, "metadata": metadata}
     return None
@@ -238,6 +268,7 @@ async def generate_difference_case(
     *,
     allowed_periods: Optional[Set[str]] = None,
     excluded_periods: Optional[Set[str]] = None,
+    templates_mode: Optional[str] = None,
 ):
     """Generate a case comparing values across periods"""
     for _ in range(10):
@@ -293,6 +324,7 @@ async def generate_cross_ticker_difference_case(
     *,
     allowed_periods: Optional[Set[str]] = None,
     excluded_periods: Optional[Set[str]] = None,
+    templates_mode: Optional[str] = None,
 ):
     """Generate case comparing two companies"""
     for _ in range(10):
@@ -402,16 +434,41 @@ DYNAMIC_NO_COMPLETION_TEMPLATES = [
     "Looking back at {period}, discussion of {company}'s {desc} centered on ",
 ]
 
+# Validation-only alternative prompts to test robustness for no-completion cases
+VALIDATION_NO_COMPLETION_STATIC_PREFIXES = [
+    "It was noted in recent commentary that ",
+    "Management believes that ",
+    "Observers have suggested that ",
+    "The company has indicated that ",
+    "It has been reported that ",
+    "There are signs that ",
+    "Some commentary suggests that ",
+    "Market participants think that ",
+]
+
+VALIDATION_NO_COMPLETION_DYNAMIC_TEMPLATES = [
+    "Discussion around {company}'s {desc} focused on ",
+    "As of {period}, commentary about {company}'s {desc} suggested ",
+    "The narrative around {company}'s {desc} was that ",
+    "Around {period}, sentiment regarding {company}'s {desc} was ",
+    "In the context of {period}, notes about {company}'s {desc} highlighted ",
+]
+
 async def generate_no_completion_case(
     tickers: List[str],
     metrics: List[Dict[str, str]],
     *,
     allowed_periods: Optional[Set[str]] = None,
     excluded_periods: Optional[Set[str]] = None,
+    templates_mode: Optional[str] = None,
 ) -> Optional[Dict[str, str]]:
     """Generate case where no completion is needed"""
     if random.random() < 0.1:
-        prefix = random.choice(STATIC_NO_COMPLETION_PREFIXES)
+        if templates_mode == "validation":
+            base_list = VALIDATION_NO_COMPLETION_STATIC_PREFIXES
+        else:
+            base_list = STATIC_NO_COMPLETION_PREFIXES
+        prefix = random.choice(base_list)
     else:
         # Dynamic no-completion requires valid ticker/metric and a valid period; no silent fallbacks
         if not tickers or not metrics:
@@ -424,20 +481,23 @@ async def generate_no_completion_case(
         if not period:
             return None
         company = await get_company_name(ticker)
-        template = random.choice(DYNAMIC_NO_COMPLETION_TEMPLATES)
+        if templates_mode == "validation":
+            template = random.choice(VALIDATION_NO_COMPLETION_DYNAMIC_TEMPLATES)
+        else:
+            template = random.choice(DYNAMIC_NO_COMPLETION_TEMPLATES)
         prefix = template.format(
             company=company,
             desc=metric["description"].lower(),
             period=period or "the last quarter"
         )
-    metadata = {"type": "no_completion", "required_lookups": []}
+    metadata = {"type": "no_completion", "required_lookups": [], "prompt_variant": (templates_mode or "default")}
     return {"input": prefix, "ground_truth": "NO_COMPLETION_NEEDED", "metadata": metadata}
 
 # ============== Main Generation Function ==============
 
 async def generate_cases(
     num_cases: int,
-    no_completion_ratio: float = 0.10,
+    no_completion_ratio: float = 0.20,
     curriculum_stage: Optional[int] = None,
     *,
     allowed_tickers: Optional[Set[str]] = None,
@@ -446,6 +506,7 @@ async def generate_cases(
     excluded_metrics: Optional[Set[str]] = None,
     allowed_periods: Optional[Set[str]] = None,
     excluded_periods: Optional[Set[str]] = None,
+    templates_mode: Optional[str] = None,
 ) -> List[Dict[str, str]]:
     """
     Generate synthetic test cases
@@ -488,20 +549,12 @@ async def generate_cases(
     ]
 
     # Default distribution within completion cases (length 4; calc case removed)
-    default_weights = [0.40, 0.20, 0.20, 0.20]
+    default_weights = [0.70, 0.30, 0.00, 0.00]
 
-    # Curriculum schedule (stage-specific weights and no-completion ratios)
-    # Stage 1: emphasize no-completion + simple/latest
-    # Stage 2: introduce differences
-    # Stage 3+: full mix
-    # Three-stage curriculum (length-4 weight vectors; calc case removed)
-    # Stage 1 (steps 0–59): [0.50, 0.30, 0.10, 0.10], no_completion 0.20
-    # Stage 2 (steps 60–99): [0.40, 0.30, 0.15, 0.15], no_completion 0.25
-    # Stage 3 (steps 100–139+): [0.40, 0.20, 0.20, 0.20], no_completion 0.25
     stage_to_weights = {
         1: ([0.70, 0.30, 0.00, 0.00], 0.20),
-        2: ([0.70, 0.30, 0.00, 0.00], 0.25),
-        3: ([0.60, 0.40, 0.00, 0.00], 0.25),
+        2: ([0.70, 0.30, 0.00, 0.00], 0.20),
+        3: ([0.70, 0.30, 0.00, 0.00], 0.20),
     }
 
     # Select weights and no-completion ratio based on curriculum stage (if provided)
@@ -549,6 +602,7 @@ async def generate_cases(
             metrics,
             allowed_periods=allowed_periods,
             excluded_periods=excluded_periods,
+            templates_mode=templates_mode,
         )
 
     # Fill no-completion quota (retry and only append valid cases)
@@ -563,6 +617,7 @@ async def generate_cases(
             metrics,
             allowed_periods=allowed_periods,
             excluded_periods=excluded_periods,
+            templates_mode=templates_mode,
         )
         if case:
             cases.append(case)

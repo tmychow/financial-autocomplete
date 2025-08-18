@@ -48,7 +48,7 @@ Open http://localhost:8000 to:
 ### Training
 
 Open `finance_rl.ipynb` to run training. The notebook orchestrates:
-- Curriculum learning (three stages) with exact-proportion sampling per batch
+- Exact-proportion sampling per batch
 - Tool-based rollouts and LLM-as-judge rewards
 - Periodic validation against a benchmark model
 
@@ -59,7 +59,7 @@ Validation uses a fixed holdout: a small, deterministic subset of tickers, metri
 ## Files
 
 - `database.py`: Tiingo loaders (statements + daily) and query utilities
-- `synthetic.py`: Synthetic case generation with curriculum-aware, exact-proportion sampling
+- `synthetic.py`: Synthetic case generation with exact-proportion sampling
 - `environment.py`: Tool execution (search, calculate, return_answer) with tolerant normalization and “did you mean” metric suggestions
 - `agent.py`: Multi-turn agent driving tool calls
 - `rewards.py`: Judge-based rewards + tool-use/coverage signals

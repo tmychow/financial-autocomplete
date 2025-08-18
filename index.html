@@ -441,6 +441,12 @@
                             Use LLM Judge
                         </label>
                     </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="use-validation-prompts">
+                            Use validation-style prompts
+                        </label>
+                    </div>
                     <button class="btn" onclick="runEvaluation()">Run Evaluation</button>
                 </div>
             </div>
@@ -763,6 +769,7 @@
             const models = modelsInput.split(',').map(m => m.trim()).filter(m => m);
             const numCases = parseInt(document.getElementById('num-cases').value);
             const useJudge = document.getElementById('use-judge').checked;
+            const useValidationPrompts = document.getElementById('use-validation-prompts').checked;
             
             if (models.length === 0) {
                 resultsContainer.innerHTML = '<div class="error">Please enter at least one model name</div>';
@@ -778,7 +785,8 @@
                     body: JSON.stringify({
                         models: models,
                         num_cases: numCases,
-                        use_judge: useJudge
+                        use_judge: useJudge,
+                        templates_mode: useValidationPrompts ? 'validation' : null
                     })
                 });
                 
@@ -795,6 +803,25 @@
         function displayEvaluationResults(results) {
             const container = document.getElementById('eval-results');
             
+            // Compute average latency per model
+            const avgLatencyByModel = {};
+            const countsByModel = {};
+            (results.results || []).forEach(caseResult => {
+                const mr = caseResult.model_results || {};
+                Object.entries(mr).forEach(([model, modelResult]) => {
+                    // Prefer inference_latency_sec; fall back to latency_sec for compatibility
+                    const raw = modelResult && (modelResult.inference_latency_sec ?? modelResult.latency_sec);
+                    const val = Number(raw);
+                    if (Number.isFinite(val)) {
+                        avgLatencyByModel[model] = (avgLatencyByModel[model] || 0) + val;
+                        countsByModel[model] = (countsByModel[model] || 0) + 1;
+                    }
+                });
+            });
+            Object.keys(avgLatencyByModel).forEach(m => {
+                avgLatencyByModel[m] = avgLatencyByModel[m] / (countsByModel[m] || 1);
+            });
+
             let html = '<div class="results">';
             
             // Summary section
@@ -811,6 +838,21 @@
                 `;
             }
             
+            html += '</div>';
+            
+            // Latency summary
+            html += '<h3 style="margin-top:10px;">Average Latency</h3>';
+            html += '<div class="accuracy-scores">';
+            for (const model of Object.keys(results.accuracy_scores)) {
+                const avg = avgLatencyByModel[model];
+                const display = Number.isFinite(avg) ? `${avg.toFixed(2)}s` : 'N/A';
+                html += `
+                    <div class="score-item">
+                        <div class="score-value">${display}</div>
+                        <div class="score-label">${model}</div>
+                    </div>
+                `;
+            }
             html += '</div></div>';
             
             // Detailed results
@@ -844,6 +886,7 @@
                             <span>Turns: ${modelResult.turns ?? 'N/A'}</span>
                             <span>Total Reward: ${modelResult.reward?.toFixed(3) || 'N/A'}</span>
                             <span>Judge: ${(modelResult.judge_score ?? modelResult.reward)?.toFixed?.(3) || modelResult.judge_score || 'N/A'}</span>
+                            <span>Latency: ${(() => { const v = modelResult.inference_latency_sec ?? modelResult.latency_sec; return Number.isFinite(Number(v)) ? Number(v).toFixed(2) + 's' : 'N/A'; })()}</span>
                             <span>Used search: ${(modelResult.used_search ?? 0).toFixed(2)}</span>
                             <span>Coverage: ${(modelResult.lookup_coverage ?? 0).toFixed(2)}</span>
                             <span>Ticker: ${(modelResult.ticker_correct ?? 0).toFixed(2)}</span>
