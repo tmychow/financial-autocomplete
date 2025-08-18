@@ -157,6 +157,8 @@ async def run_single_rollout(
             (test_case.get("ground_truth") == "NO_COMPLETION_NEEDED")
             or (isinstance(meta, dict) and meta.get("type") == "no_completion")
         )
+        # Normalize prompt variant for numeric one-hot metrics
+        variant = (meta.get("prompt_variant") if isinstance(meta, dict) else None) or "default"
 
         metrics = {
             "reward": reward_info["total_reward"],
@@ -186,9 +188,8 @@ async def run_single_rollout(
             "incorrect_abstain": reward_info.get("incorrect_abstain", 0.0),
             "answered": 1.0 if episode_info.get("completed") else 0.0,
             "did_not_answer": 0.0 if episode_info.get("completed") else 1.0,
-            # Prompt variant signals for analysis
-            "case_type": (meta.get("type") if isinstance(meta, dict) else None) or ("no_completion" if is_no_completion_case else "completion"),
-            "prompt_variant": (meta.get("prompt_variant") if isinstance(meta, dict) else None) or "default",
+            # Prompt variant binary (numeric only)
+            "prompt_variant_is_validation": 1.0 if variant == "validation" else 0.0,
         }
         
         # Create ART trajectory
