@@ -75,6 +75,7 @@ yarn-error.log*
 
 # Reports
 *.json
+*.jsonl
 
 # Plots
 *.png

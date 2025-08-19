@@ -391,6 +391,47 @@
         .judge-reasoning strong {
             color: #333;
         }
+        
+        /* Latency histogram */
+        .latency-section {
+            background: #f8f8f8;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        .hist-row {
+            display: flex;
+            align-items: flex-end;
+            gap: 10px;
+            margin: 8px 0;
+        }
+        .model-label {
+            width: 160px;
+            font-weight: 600;
+            font-size: 12px;
+            color: #333;
+        }
+        .hist-bars {
+            display: flex;
+            align-items: flex-end;
+            gap: 2px;
+            height: 60px;
+            flex: 1;
+        }
+        .hist-bar {
+            flex: 1 1 0;
+            background: #90caf9;
+            border-radius: 2px 2px 0 0;
+        }
+        .hist-bar:hover {
+            background: #64b5f6;
+        }
+        .hist-stats {
+            width: 280px;
+            text-align: right;
+            font-size: 11px;
+            color: #666;
+        }
     </style>
 </head>
 <body>
@@ -806,6 +847,7 @@
             // Compute average latency per model
             const avgLatencyByModel = {};
             const countsByModel = {};
+            const latenciesByModel = {};
             (results.results || []).forEach(caseResult => {
                 const mr = caseResult.model_results || {};
                 Object.entries(mr).forEach(([model, modelResult]) => {
@@ -815,6 +857,7 @@
                     if (Number.isFinite(val)) {
                         avgLatencyByModel[model] = (avgLatencyByModel[model] || 0) + val;
                         countsByModel[model] = (countsByModel[model] || 0) + 1;
+                        (latenciesByModel[model] ||= []).push(val);
                     }
                 });
             });
@@ -853,7 +896,64 @@
                     </div>
                 `;
             }
-            html += '</div></div>';
+            html += '</div>';
+
+            // Latency distribution (per-model mini histograms + percentiles)
+            const latencyModels = Object.keys(latenciesByModel);
+            if (latencyModels.length) {
+                // Build common bins across all models (use 10 bins between 5th and 95th percentile of all latencies)
+                const all = latencyModels.flatMap(m => latenciesByModel[m]);
+                all.sort((a,b)=>a-b);
+                const p = q => all.length ? all[Math.min(all.length-1, Math.max(0, Math.floor(q*(all.length-1))))] : 0;
+                const lo = p(0.05);
+                const hi = p(0.95);
+                const minV = Math.min(...all);
+                const maxV = Math.max(...all);
+                const rangeMin = Number.isFinite(lo) ? lo : minV;
+                const rangeMax = Number.isFinite(hi) ? hi : maxV;
+                const bins = 12;
+                const width = (rangeMax - rangeMin) > 0 ? (rangeMax - rangeMin) : 1;
+                function toHist(arr) {
+                    const h = new Array(bins).fill(0);
+                    arr.forEach(v => {
+                        const idx = Math.max(0, Math.min(bins - 1, Math.floor((v - rangeMin) / width * bins)));
+                        h[idx]++;
+                    });
+                    return h;
+                }
+                function percentile(arr, q) {
+                    if (!arr.length) return NaN;
+                    const a = arr.slice().sort((x,y)=>x-y);
+                    const idx = Math.min(a.length-1, Math.max(0, Math.floor(q*(a.length-1))));
+                    return a[idx];
+                }
+                // Find global max count for normalization
+                const hists = Object.fromEntries(latencyModels.map(m => [m, toHist(latenciesByModel[m])]));
+                const globalMax = Math.max(1, ...Object.values(hists).flat());
+
+                html += '<div class="latency-section">';
+                html += '<h3 style="margin-bottom:6px;">Latency Distribution</h3>';
+                latencyModels.forEach(m => {
+                    const hist = hists[m];
+                    const p50 = percentile(latenciesByModel[m], 0.50);
+                    const p90 = percentile(latenciesByModel[m], 0.90);
+                    const p95 = percentile(latenciesByModel[m], 0.95);
+                    const p99 = percentile(latenciesByModel[m], 0.99);
+                    html += '<div class="hist-row">';
+                    html += `<div class="model-label">${m}</div>`;
+                    html += '<div class="hist-bars">';
+                    hist.forEach(c => {
+                        const h = Math.round((c / globalMax) * 60);
+                        html += `<div class="hist-bar" style="height:${h}px" title="${c} cases"></div>`;
+                    });
+                    html += '</div>';
+                    html += `<div class="hist-stats">p50 ${Number.isFinite(p50)?p50.toFixed(2):'—'}s • p90 ${Number.isFinite(p90)?p90.toFixed(2):'—'}s • p95 ${Number.isFinite(p95)?p95.toFixed(2):'—'}s • p99 ${Number.isFinite(p99)?p99.toFixed(2):'—'}s</div>`;
+                    html += '</div>';
+                });
+                html += '</div>';
+            }
+
+            html += '</div>';
             
             // Detailed results
             html += '<div class="detailed-results">';
