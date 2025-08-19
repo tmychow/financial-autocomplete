@@ -65,6 +65,18 @@ class EvaluationResponse(BaseModel):
     # Allow metadata objects in test cases
     test_cases: List[Dict[str, Any]]
 
+# Live autocomplete request/response models
+class AutocompleteRequest(BaseModel):
+    text: str
+    model: Optional[str] = None
+    max_turns: int = 7
+
+class AutocompleteResponse(BaseModel):
+    completion: Optional[str]
+    used_model: str
+    latency_sec: float
+    tool_calls: int
+
 # Startup handled via lifespan
 
 # Endpoints
@@ -271,6 +283,86 @@ async def batch_evaluation(request: EvaluationRequest):
         results=results,
         accuracy_scores=accuracy_scores,
         test_cases=test_cases
+    )
+
+@app.post("/api/autocomplete", response_model=AutocompleteResponse)
+async def live_autocomplete(request: AutocompleteRequest):
+    """Single-turn live autocomplete for a given input prefix.
+    Returns a suggested completion if the model deems one is needed.
+    """
+    model_name = request.model or os.getenv("DEFAULT_MODEL", "gpt-4.1-mini")
+
+    # Build model (reuse simple wrappers from batch evaluator)
+    if model_name.startswith("gpt"):
+        from openai import AsyncOpenAI
+
+        class OpenAIModel:
+            def __init__(self, name: str):
+                self.name = name
+                self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+            async def __call__(self, messages):
+                response = await self.client.chat.completions.create(
+                    model=self.name,
+                    messages=messages,
+                    temperature=0.7,
+                    top_p=0.9,
+                    max_tokens=64,
+                )
+                return response.choices[0].message.content.strip()
+
+        model = OpenAIModel(model_name)
+    elif model_name.startswith("ollama:"):
+        class OllamaModel:
+            def __init__(self, name: str):
+                self.name = name.split(":", 1)[1]
+
+            async def __call__(self, messages):
+                try:
+                    import asyncio
+                    import ollama
+                    loop = asyncio.get_running_loop()
+
+                    def _chat():
+                        return ollama.chat(
+                            model=self.name,
+                            messages=messages,
+                            options={"temperature": 0.7, "top_p": 0.9, "num_predict": 64},
+                        )
+
+                    response = await loop.run_in_executor(None, _chat)
+                    return response["message"]["content"].strip()
+                except Exception as e:
+                    return f"return_answer(answer='[ollama error: {str(e)}]')"
+
+        model = OllamaModel(model_name)
+    else:
+        class MockModel:
+            name = model_name
+
+            async def __call__(self, messages):
+                return "return_answer(answer='')"
+
+        model = MockModel()
+
+    # Run the agent once for this input
+    agent = AutocompleteAgent(model=model)
+    start = time.perf_counter()
+    completion, _tool_calls, episode_info = await agent.get_completion(
+        request.text, max_turns=max(1, int(request.max_turns))
+    )
+    end = time.perf_counter()
+
+    # Normalize completion: treat empty/placeholder as no suggestion
+    normalized = (completion or "").strip() if isinstance(completion, str) else None
+    if not normalized or normalized == "NO_COMPLETION_NEEDED":
+        normalized = None
+
+    return AutocompleteResponse(
+        completion=normalized,
+        used_model=model_name,
+        latency_sec=(end - start),
+        tool_calls=int(episode_info.get("tool_calls_count", 0)),
     )
 
 if __name__ == "__main__":

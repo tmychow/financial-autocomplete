@@ -432,6 +432,60 @@
             font-size: 11px;
             color: #666;
         }
+
+        /* Live autocomplete panel */
+        .live-panel {
+            background: #f8f8f8;
+            padding: 20px;
+            border-radius: 6px;
+        }
+        .live-row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+        }
+        .live-input-wrap {
+            position: relative;
+            width: 100%;
+            max-width: 900px;
+            height: 44px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 0 12px;
+            display: flex;
+            align-items: center;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 14px;
+        }
+        #live-input {
+            position: relative;
+            z-index: 2;
+            width: 100%;
+            height: 100%;
+            border: none;
+            outline: none;
+            background: transparent;
+            font: inherit;
+        }
+        #live-suggestion {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            left: 12px;
+            pointer-events: none;
+            white-space: nowrap;
+            z-index: 1;
+            font: inherit;
+        }
+        #live-sugg-prefix { color: transparent; }
+        #live-sugg-suffix { color: #bbb; }
+        .live-meta {
+            font-size: 12px;
+            color: #666;
+        }
     </style>
 </head>
 <body>
@@ -444,6 +498,7 @@
             <button class="tab active" onclick="switchTab('data')">Database Viewer</button>
             <button class="tab" onclick="switchTab('eval')">Model Evaluator</button>
             <button class="tab" onclick="switchTab('logs')">Trajectory Logs</button>
+            <button class="tab" onclick="switchTab('live')">Live Autocomplete</button>
         </div>
         
         <!-- Data Viewer Tab -->
@@ -533,6 +588,33 @@
             <div id="logs-summary" class="summary" style="display:none;"></div>
             <div id="logs-container" class="detailed-results"></div>
         </div>
+
+        <!-- Live Autocomplete Tab -->
+        <div id="live-tab" class="tab-content">
+            <div class="live-panel">
+                <div class="live-row">
+                    <div class="form-group">
+                        <label>Model (optional)</label>
+                        <input type="text" id="live-model" placeholder="e.g., gpt-4.1-mini or ollama:qwen2.5:3b-instruct" style="width: 320px;">
+                    </div>
+                    <div class="form-group">
+                        <label>Max Turns</label>
+                        <input type="number" id="live-max-turns" value="7" min="1" max="12" style="width: 120px;">
+                    </div>
+                    <div class="form-group">
+                        <label>&nbsp;</label>
+                        <button class="btn" onclick="clearLive()">Clear</button>
+                    </div>
+                </div>
+                <div class="live-input-wrap">
+                    <input id="live-input" type="text" placeholder="Type your sentence..." autocomplete="off" spellcheck="false">
+                    <div id="live-suggestion"><span id="live-sugg-prefix"></span><span id="live-sugg-suffix"></span></div>
+                </div>
+                <div class="live-row" style="margin-top:8px;">
+                    <div class="live-meta" id="live-meta">Type to get suggestions. Press Tab to accept.</div>
+                </div>
+            </div>
+        </div>
     </div>
     
     <script>
@@ -541,6 +623,9 @@
         let financialData = [];
         let evaluationResults = null;
         let trajectoryRecords = [];
+        let liveController = null;
+        let livePendingSeq = 0;
+        let liveAcceptedSeq = 0;
         
         // Tab switching
         function switchTab(tab) {
@@ -557,6 +642,9 @@
             // Load data if switching to data tab
             if (tab === 'data' && financialData.length === 0) {
                 loadFinancialData();
+            }
+            if (tab === 'live') {
+                document.getElementById('live-input')?.focus();
             }
         }
         // Logs tab: load and render JSONL
@@ -1104,7 +1192,95 @@
         // Load initial data
         window.onload = () => {
             loadFinancialData();
+            setupLiveAutocomplete();
         };
+
+        function setupLiveAutocomplete() {
+            const input = document.getElementById('live-input');
+            const sugg = document.getElementById('live-suggestion');
+            const meta = document.getElementById('live-meta');
+            if (!input) return;
+
+            function setSuggestion(text) {
+                const prefix = input.value || '';
+                const pEl = document.getElementById('live-sugg-prefix');
+                const sEl = document.getElementById('live-sugg-suffix');
+                if (!text) {
+                    if (pEl) pEl.textContent = '';
+                    if (sEl) sEl.textContent = '';
+                    return;
+                }
+                if (text.startsWith(prefix)) {
+                    if (pEl) pEl.textContent = prefix;
+                    if (sEl) sEl.textContent = text.slice(prefix.length);
+                } else {
+                    if (pEl) pEl.textContent = prefix;
+                    if (sEl) sEl.textContent = text;
+                }
+            }
+
+            input.addEventListener('input', () => {
+                // Cancel previous
+                if (liveController) {
+                    try { liveController.abort(); } catch (e) {}
+                    liveController = null;
+                }
+                const text = input.value;
+                setSuggestion('');
+                if (!text || !text.trim()) {
+                    meta.textContent = 'Type to get suggestions. Press Tab to accept.';
+                    return;
+                }
+                const model = document.getElementById('live-model').value.trim();
+                const maxTurns = parseInt(document.getElementById('live-max-turns').value) || 7;
+                const seq = ++livePendingSeq; // tag this request
+                liveController = new AbortController();
+                const startedAt = performance.now();
+                fetch('/api/autocomplete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text, model: model || undefined, max_turns: maxTurns }),
+                    signal: liveController.signal,
+                }).then(r => r.json()).then(resp => {
+                    // Ignore if superseded
+                    if (seq < liveAcceptedSeq) return;
+                    liveAcceptedSeq = seq;
+                    setSuggestion(resp.completion || '');
+                    const lat = Number(resp.latency_sec);
+                    meta.textContent = `Model: ${resp.used_model || 'default'} • Latency: ${Number.isFinite(lat) ? lat.toFixed(2)+'s' : '—'} • Tool calls: ${resp.tool_calls ?? 0}`;
+                }).catch(err => {
+                    if (err?.name === 'AbortError') return; // expected
+                    meta.textContent = `Error: ${err?.message || err}`;
+                });
+            });
+
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Tab') {
+                    const suggestion = (document.getElementById('live-sugg-prefix').textContent || '') + (document.getElementById('live-sugg-suffix').textContent || '');
+                    const prefix = input.value || '';
+                    if (suggestion && suggestion.startsWith(prefix)) {
+                        e.preventDefault();
+                        input.value = suggestion;
+                        setSuggestion('');
+                        // After accepting, do not immediately re-fire; let user continue typing
+                    }
+                }
+            });
+        }
+
+        function clearLive() {
+            if (liveController) {
+                try { liveController.abort(); } catch (e) {}
+                liveController = null;
+            }
+            const input = document.getElementById('live-input');
+            const sugg = document.getElementById('live-suggestion');
+            const meta = document.getElementById('live-meta');
+            if (input) input.value = '';
+            if (sugg) sugg.textContent = '';
+            if (meta) meta.textContent = 'Type to get suggestions. Press Tab to accept.';
+            input?.focus();
+        }
     </script>
 </body>
 </html>
